@@ -1,4 +1,4 @@
-# TG Channel Stat
+# TG Channel Stats
 
 A cross-platform desktop app for analyzing Telegram channels. Point it at any
 public channel (or a private one you're a member of), pick a period, and it
