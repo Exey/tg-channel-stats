@@ -1,0 +1,4 @@
+.venv
+app/__pycache__
+app/tools/__pycache__
+app/ui/__pycache__
