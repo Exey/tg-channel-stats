@@ -1,4 +1,4 @@
-"""Side-by-side comparison of 2-4 fetched channels.
+"""Side-by-side comparison of 2-6 fetched channels.
 
 Reuses the same StatCard tiles as the single-channel dashboard, laid out as
 one column per channel so the numbers line up for an easy diff. Selection
@@ -6,27 +6,32 @@ happens from the sidebar's compare mode (see SidePanel.compare_requested).
 """
 from __future__ import annotations
 
+from datetime import datetime
+
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QHBoxLayout, QLabel, QScrollArea, QVBoxLayout, QWidget
 
-from .dashboard_view import fmt_int
-from .widgets import StatCard, hline
+from .dashboard_view import fmt_int, short_num
+from .widgets import StatCard
 
+# (card key, i18n key) — order here is display order top-to-bottom.
 _METRICS = [
     ("members", "stat_members"),
     ("avg_views", "stat_avg_views"),
-    ("max_views", "stat_max_views"),
-    ("posts_per_day", "stat_posts_per_day"),
-    ("avg_reactions", "stat_avg_reactions"),
-    ("avg_reposts", "stat_avg_reposts"),
-    ("max_reposts", "stat_max_reposts"),
     ("views_per_member", "stat_views_per_member"),
+    ("max_views", "cmp_max_views"),
+    ("posts_per_day", "cmp_posts_per_day"),
+    ("avg_reposts", "stat_avg_reposts"),
     ("reposts_per_post", "stat_reposts_per_post"),
+    ("max_reposts", "cmp_max_reposts"),
+    ("avg_reactions", "cmp_avg_reactions"),
     ("err_pct", "stat_err_pct"),
+    ("view_repost_last_year", "cmp_view_repost_year"),
 ]
 
-_CARD_HEIGHT = round(132 * 0.6)  # StatCard's default (132) minus 40%
-MAX_COMPARE = 4
+_CARD_HEIGHT = round(132 * 0.6 * 0.9)  # -40%, then another -10%
+MAX_COMPARE = 6
+LAST_FULL_YEAR = datetime.now().year - 1
 
 
 class CompareView(QWidget):
@@ -40,13 +45,8 @@ class CompareView(QWidget):
 
     def _build_ui(self) -> None:
         outer = QVBoxLayout(self)
-        outer.setContentsMargins(34, 28, 40, 24)
+        outer.setContentsMargins(34, 16, 40, 24)
         outer.setSpacing(16)
-
-        self.title_lbl = QLabel(self.tr_("compare_title"))
-        self.title_lbl.setObjectName("pageTitle")
-        outer.addWidget(self.title_lbl)
-        outer.addWidget(hline())
 
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
@@ -70,20 +70,24 @@ class CompareView(QWidget):
                 title = self.tr_(title_key)
                 if key == "err_pct":
                     title = f"{title} ({self.tr_('stat_err_pct_sub')})"
+                elif key == "view_repost_last_year":
+                    title = self.tr_(title_key, year=LAST_FULL_YEAR)
                 card = StatCard(title)
                 card.setMinimumHeight(_CARD_HEIGHT)
+                card.set_compact(True)
                 cards[key] = card
                 col_lay.addWidget(card)
             col_lay.addStretch()
             holder = QWidget()
             holder.setLayout(col_lay)
-            holder.setMinimumWidth(220)
+            holder.setMinimumWidth(200)
             columns.addWidget(holder, 1)
             self._columns.append({"holder": holder, "name": name_lbl, "cards": cards})
 
     def load(self, datas: list[dict]) -> None:
         datas = datas[:MAX_COMPARE]
         raw: list[dict] = []
+        names: list[str] = []
         for i, col in enumerate(self._columns):
             if i >= len(datas):
                 col["holder"].setVisible(False)
@@ -100,6 +104,8 @@ class CompareView(QWidget):
             avg_views_settled = stats.get("avg_views_settled")
             if avg_views_settled is None:
                 avg_views_settled = avg_views
+            views_ly = stats.get("last_year_views", 0) or 0
+            reposts_ly = stats.get("last_year_reposts", 0) or 0
             vals = {
                 "members": members,
                 "avg_views": avg_views,
@@ -111,9 +117,13 @@ class CompareView(QWidget):
                 "views_per_member": (avg_views / members) if members else 0,
                 "reposts_per_post": avg_reposts,
                 "err_pct": (avg_views_settled / members * 100) if members else 0,
+                # winner = whoever converts views to reposts best, not raw totals
+                "view_repost_last_year": (reposts_ly / views_ly) if views_ly else 0,
             }
             raw.append(vals)
-            col["name"].setText(data.get("title") or data.get("channel") or "—")
+            name = data.get("title") or data.get("channel") or "—"
+            names.append(name)
+            col["name"].setText(name)
             col["cards"]["members"].set_value(fmt_int(vals["members"]) if vals["members"] else "—")
             col["cards"]["avg_views"].set_value(fmt_int(round(vals["avg_views"])))
             col["cards"]["max_views"].set_value(fmt_int(vals["max_views"]))
@@ -124,11 +134,23 @@ class CompareView(QWidget):
             col["cards"]["views_per_member"].set_value(f"{vals['views_per_member']:.2f}")
             col["cards"]["reposts_per_post"].set_value(fmt_int(round(vals["reposts_per_post"])))
             col["cards"]["err_pct"].set_value(f"{vals['err_pct']:.1f}%")
+            col["cards"]["view_repost_last_year"].set_value(
+                f"{short_num(views_ly, 2)} 👁 / {short_num(reposts_ly, 2)} 🔄"
+                if views_ly else "—")
 
         shown = self._columns[:len(raw)]
+        win_counts = [0] * len(shown)
         for key, _ in _METRICS:
             values = [v[key] for v in raw]
             top = max(values) if values else None
-            winner = values.index(top) if top is not None and values.count(top) == 1 else None
+            winner = values.index(top) if top is not None and top > 0 and values.count(top) == 1 else None
             for i, col in enumerate(shown):
-                col["cards"][key].set_highlighted(i == winner)
+                is_win = i == winner
+                col["cards"][key].set_highlighted(is_win)
+                if is_win:
+                    win_counts[i] += 1
+
+        best = max(win_counts) if win_counts else 0
+        overall = win_counts.index(best) if best > 0 and win_counts.count(best) == 1 else None
+        for i, col in enumerate(shown):
+            col["name"].setText(f"{names[i]} 👑" if i == overall else names[i])

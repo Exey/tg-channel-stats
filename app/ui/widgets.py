@@ -62,6 +62,20 @@ class StatCard(Card):
             self.spark.set_data(spark)
             self.spark.setVisible(bool(spark))
 
+    def set_compact(self, on: bool = True) -> None:
+        """Tighter padding + smaller type — used by compare mode, where each
+        card is much shorter than the dashboard's full-size tiles."""
+        if on:
+            self.layout().setContentsMargins(14, 6, 14, 6)
+            self.layout().setSpacing(2)
+            self.title_lbl.setStyleSheet("font-size: 11px;")
+            self.value_lbl.setStyleSheet("font-size: 18px;")
+        else:
+            self.layout().setContentsMargins(18, 16, 18, 16)
+            self.layout().setSpacing(6)
+            self.title_lbl.setStyleSheet("")
+            self.value_lbl.setStyleSheet("")
+
     def set_highlighted(self, on: bool) -> None:
         """Gold border — used by compare mode to mark the winning metric."""
         self.setStyleSheet(
@@ -121,6 +135,11 @@ class NavButton(QPushButton):
         self._label.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
         lay.addWidget(self._label, 1)
 
+        self._meta = QLabel()
+        self._meta.setObjectName("navMeta")
+        self._meta.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
+        lay.addWidget(self._meta)
+
         self.setMinimumHeight(46)
         self.toggled.connect(self._sync_icon)
         self._sync_icon(False)
@@ -131,6 +150,9 @@ class NavButton(QPushButton):
 
     def set_text(self, text: str) -> None:
         self._label.setText(text)
+
+    def set_meta(self, text: str) -> None:
+        self._meta.setText(text)
 
 
 def hline() -> QFrame:

@@ -5,7 +5,8 @@ from __future__ import annotations
 from PySide6.QtCore import QUrl
 from PySide6.QtGui import QAction, QDesktopServices, QGuiApplication, QKeySequence
 from PySide6.QtWidgets import (
-    QApplication, QHBoxLayout, QMainWindow, QMessageBox, QStackedWidget, QWidget,
+    QApplication, QHBoxLayout, QMainWindow, QMessageBox, QPushButton,
+    QStackedWidget, QVBoxLayout, QWidget,
 )
 
 from ..config import Config, config_dir
@@ -27,6 +28,7 @@ class MainWindow(QMainWindow):
         self.resize(1240, 860)
         self.setMinimumSize(1040, 720)
         self._current_key: str | None = None   # None => Config screen
+        self._sidebar_folded = False
         apply_theme(QApplication.instance(), self.cfg.theme)
         self._build_ui()
         try:
@@ -51,7 +53,25 @@ class MainWindow(QMainWindow):
         self.side.channel_selected.connect(self._show_channel)
         self.side.compare_requested.connect(self._show_compare)
         self.side.compare_mode_off.connect(self._on_compare_mode_off)
+        self.side.fold_requested.connect(self._fold_sidebar)
+        self.side.language_toggle_requested.connect(self._toggle_language)
         lay.addWidget(self.side)
+
+        content_col = QVBoxLayout()
+        content_col.setContentsMargins(0, 0, 0, 0)
+        content_col.setSpacing(0)
+
+        top_strip = QHBoxLayout()
+        top_strip.setContentsMargins(16, 10, 12, 0)
+        self.unfold_btn = QPushButton("▶")
+        self.unfold_btn.setObjectName("ghost")
+        self.unfold_btn.setMinimumWidth(28)
+        self.unfold_btn.setToolTip(self.i18n.tr("nav_unfold_hint"))
+        self.unfold_btn.clicked.connect(self._unfold_sidebar)
+        self.unfold_btn.setVisible(False)
+        top_strip.addWidget(self.unfold_btn)
+        top_strip.addStretch()
+        content_col.addLayout(top_strip)
 
         self.stack = QStackedWidget()
         self.config_view = ConfigView(self.cfg, self.i18n)
@@ -63,11 +83,18 @@ class MainWindow(QMainWindow):
         self.stack.addWidget(self.config_view)   # index 0
         self.stack.addWidget(self.dashboard)     # index 1
         self.stack.addWidget(self.compare)       # index 2
-        lay.addWidget(self.stack, 1)
+        content_col.addWidget(self.stack, 1)
+
+        content_wrap = QWidget()
+        content_wrap.setLayout(content_col)
+        lay.addWidget(content_wrap, 1)
 
         self.setCentralWidget(central)
         self._build_menu()
         self._refresh_sidebar()
+
+        self.side.setVisible(not self._sidebar_folded)
+        self.unfold_btn.setVisible(self._sidebar_folded)
 
         # Restore selection after a rebuild (language switch).
         if self._current_key and self.side.has_channel(self._current_key):
@@ -118,6 +145,16 @@ class MainWindow(QMainWindow):
     # ------------------------------------------------------------- sidebar
     def _refresh_sidebar(self) -> None:
         self.side.set_channels(self.store.list())
+
+    def _fold_sidebar(self) -> None:
+        self._sidebar_folded = True
+        self.side.setVisible(False)
+        self.unfold_btn.setVisible(True)
+
+    def _unfold_sidebar(self) -> None:
+        self._sidebar_folded = False
+        self.side.setVisible(True)
+        self.unfold_btn.setVisible(False)
 
     # ------------------------------------------------------------- actions
     def _show_config(self) -> None:
@@ -173,6 +210,9 @@ class MainWindow(QMainWindow):
             self._show_config()
 
     # ------------------------------------------------------------ language
+    def _toggle_language(self) -> None:
+        self._switch_language("ru" if self.i18n.lang == "en" else "en")
+
     def _switch_language(self, code: str) -> None:
         if code == self.i18n.lang:
             self._build_menu()

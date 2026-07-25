@@ -192,6 +192,7 @@ def build_qss() -> str:
         background: {c['accent_soft']}; color: {c['accent']}; font-weight: 700;
     }}
     QLabel#navEmpty {{ color: {c['faint']}; font-size: 12px; padding: 6px 10px; }}
+    QLabel#navMeta {{ color: {c['faint']}; font-size: 11px; font-weight: 700; }}
 
     /* ---------------- cards ---------------- */
     QFrame#card {{

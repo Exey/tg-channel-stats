@@ -36,6 +36,18 @@ def fmt_int(n) -> str:
         return str(n)
 
 
+def short_num(n, decimals: int = 1) -> str:
+    """Compact form for big counts: 6.6K, 7.15M (decimals=2), …"""
+    try:
+        v = float(n or 0)
+    except (TypeError, ValueError):
+        return str(n)
+    for div, suf in ((1_000_000_000, "B"), (1_000_000, "M"), (1_000, "K")):
+        if abs(v) >= div:
+            return f"{v / div:.{decimals}f}{suf}"
+    return str(int(v))
+
+
 def build_post_link(channel_text: str, msg_id: int) -> str:
     """t.me link from whatever channel identifier we have (@user or -100…)."""
     v = str(channel_text).strip().lstrip("@")

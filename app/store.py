@@ -97,6 +97,7 @@ class ChannelStore:
                 "channel": data.get("channel", ""),
                 "username": data.get("username", ""),
                 "fetched_at": data.get("fetched_at", ""),
+                "members": data.get("info", {}).get("members", 0) or 0,
             })
         out.sort(key=lambda d: d.get("fetched_at", ""), reverse=True)
         return out

@@ -173,6 +173,7 @@ async def run_channel_stat(client, p: dict, ctx) -> str:
     current: dict | None = None   # album row currently being accumulated
     current_gid = None
     err_cutoff = datetime.now(timezone.utc) - timedelta(days=ERR_MIN_AGE_DAYS)
+    last_full_year = datetime.now(timezone.utc).year - 1
 
     # Activity accumulators (per merged post).
     posts = 0
@@ -184,6 +185,8 @@ async def run_channel_stat(client, p: dict, ctx) -> str:
     max_forwards = 0
     sum_views_settled = 0
     views_settled_n = 0
+    sum_views_last_year = 0
+    sum_forwards_last_year = 0
     with_media = with_photo = with_document = 0
     hour_dist = [0] * 24
     weekday_dist = [0] * 7
@@ -195,6 +198,7 @@ async def run_channel_stat(client, p: dict, ctx) -> str:
         """Fold one *new* merged post into the activity stats."""
         nonlocal posts, sum_views, views_n, max_views, sum_reactions
         nonlocal sum_forwards, max_forwards, sum_views_settled, views_settled_n
+        nonlocal sum_views_last_year, sum_forwards_last_year
         nonlocal with_media, with_photo, with_document, first_ts, last_ts
         posts += 1
         v = row["views"]
@@ -208,6 +212,9 @@ async def run_channel_stat(client, p: dict, ctx) -> str:
         sum_reactions += row["reactions"]
         sum_forwards += row["forwards"]
         max_forwards = max(max_forwards, row["forwards"])
+        if msg.date and msg.date.year == last_full_year:
+            sum_views_last_year += v
+            sum_forwards_last_year += row["forwards"]
         if getattr(msg, "media", None) is not None:
             with_media += 1
         if getattr(msg, "photo", None) is not None:
@@ -289,6 +296,9 @@ async def run_channel_stat(client, p: dict, ctx) -> str:
         "max_reposts": max_forwards,
         "avg_views_settled": round(sum_views_settled / views_settled_n, 1)
                              if views_settled_n else 0,
+        "last_full_year": last_full_year,
+        "last_year_views": sum_views_last_year,
+        "last_year_reposts": sum_forwards_last_year,
         "avg_posts_per_day": round(posts / total_days, 2) if total_days else 0,
         "posts_with_media": with_media,
         "posts_with_photo": with_photo,

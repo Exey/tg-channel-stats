@@ -2,13 +2,16 @@
 from __future__ import annotations
 
 EN = {
-    "app_title": "TG Channel Stat",
+    "app_title": "TG Channel Stats",
     # nav / sidebar
     "nav_config": "Config",
     "nav_channels": "Channels",
     "nav_no_channels": "No channels yet — fetch one from the Config screen.",
     "nav_compare": "⇄ Compare",
-    "nav_compare_hint": "Pick 2-4 channels to compare.",
+    "nav_compare_hint": "Pick 2-6 channels to compare.",
+    "nav_fold_hint": "Collapse sidebar",
+    "nav_unfold_hint": "Expand sidebar",
+    "nav_lang_hint": "Switch language",
     "compare_title": "Compare channels",
     # menus
     "menu_file": "File",
@@ -116,9 +119,14 @@ EN = {
     "stat_created": "Created",
     # compare-mode calculated cards
     "stat_views_per_member": "Avg. views / member",
-    "stat_reposts_per_post": "Avg. reposts / post",
-    "stat_err_pct": "ERR %",
-    "stat_err_pct_sub": "posts older than 2 weeks",
+    "stat_reposts_per_post": "Avg. repost / post",
+    "stat_err_pct": "ERR%",
+    "stat_err_pct_sub": "2 weeks+",
+    "cmp_max_views": "Max views / post",
+    "cmp_posts_per_day": "Post / day",
+    "cmp_max_reposts": "Max repost / post",
+    "cmp_avg_reactions": "Avg. reactions / post",
+    "cmp_view_repost_year": "Views / Reposts {year}",
     # charts
     "chart_activity": "Month activity",
     "chart_by_hour": "Posts by hour of day",
@@ -158,12 +166,15 @@ EN = {
 }
 
 RU = {
-    "app_title": "TG Channel Stat",
+    "app_title": "TG Channel Stats",
     "nav_config": "Настройки",
     "nav_channels": "Каналы",
     "nav_no_channels": "Пока нет каналов — загрузите канал на экране «Настройки».",
     "nav_compare": "⇄ Сравнить",
-    "nav_compare_hint": "Выберите 2-4 канала для сравнения.",
+    "nav_compare_hint": "Выберите 2-6 каналов для сравнения.",
+    "nav_fold_hint": "Свернуть панель",
+    "nav_unfold_hint": "Развернуть панель",
+    "nav_lang_hint": "Переключить язык",
     "compare_title": "Сравнение каналов",
     "menu_file": "Файл",
     "menu_language": "Язык",
@@ -263,9 +274,14 @@ RU = {
     "stat_max_reposts": "Макс. репосты",
     "stat_created": "Создан",
     "stat_views_per_member": "Ср. просмотры / подписчика",
-    "stat_reposts_per_post": "Ср. репосты / пост",
-    "stat_err_pct": "ERR %",
-    "stat_err_pct_sub": "посты старше 2 недель",
+    "stat_reposts_per_post": "Ср. репост / пост",
+    "stat_err_pct": "ERR%",
+    "stat_err_pct_sub": "2 нед.+",
+    "cmp_max_views": "Макс. просмотры / пост",
+    "cmp_posts_per_day": "Постов / день",
+    "cmp_max_reposts": "Макс. репост / пост",
+    "cmp_avg_reactions": "Ср. реакции / пост",
+    "cmp_view_repost_year": "Просмотры / Репосты {year}",
     "chart_activity": "Активность по месяцам",
     "chart_by_hour": "Посты по часам суток",
     "chart_by_weekday": "Посты по дням недели",

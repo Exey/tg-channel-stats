@@ -14,6 +14,7 @@ from PySide6.QtWidgets import (
 )
 
 from .compare_view import MAX_COMPARE
+from .dashboard_view import short_num
 from .theme import COLORS
 from .widgets import NavButton, hline
 
@@ -21,8 +22,10 @@ from .widgets import NavButton, hline
 class SidePanel(QFrame):
     config_selected = Signal()
     channel_selected = Signal(str)   # checkpoint key
-    compare_requested = Signal(list)  # exactly 2 checkpoint keys
+    compare_requested = Signal(list)  # 2-6 checkpoint keys
     compare_mode_off = Signal()
+    fold_requested = Signal()
+    language_toggle_requested = Signal()
 
     def __init__(self, i18n, parent=None) -> None:
         super().__init__(parent)
@@ -36,21 +39,37 @@ class SidePanel(QFrame):
         root.setContentsMargins(16, 22, 16, 18)
         root.setSpacing(10)
 
+        brand_row = QHBoxLayout()
         brand = QLabel()
         brand.setObjectName("brand")
-        brand.setText(f"TG&nbsp;Channel<span style='color:{COLORS['accent']};'> Stat</span>")
+        brand.setText(f"TG&nbsp;Channel<span style='color:{COLORS['accent']};'> Stats</span>")
         brand.setTextFormat(Qt.TextFormat.RichText)
-        root.addWidget(brand)
+        brand_row.addWidget(brand, 1)
+        self.fold_btn = QPushButton("◀")
+        self.fold_btn.setObjectName("ghost")
+        self.fold_btn.setMinimumWidth(28)
+        self.fold_btn.setToolTip(i18n.tr("nav_fold_hint"))
+        self.fold_btn.clicked.connect(lambda: self.fold_requested.emit())
+        brand_row.addWidget(self.fold_btn)
+        root.addLayout(brand_row)
 
         root.addSpacing(10)
 
         self.group = QButtonGroup(self)
         self.group.setExclusive(True)
 
+        config_row = QHBoxLayout()
         self.config_btn = NavButton("settings", i18n.tr("nav_config"))
         self.config_btn.clicked.connect(lambda: self.config_selected.emit())
         self.group.addButton(self.config_btn)
-        root.addWidget(self.config_btn)
+        config_row.addWidget(self.config_btn, 1)
+        self.lang_btn = QPushButton(i18n.lang.upper())
+        self.lang_btn.setObjectName("ghost")
+        self.lang_btn.setMinimumWidth(36)
+        self.lang_btn.setToolTip(i18n.tr("nav_lang_hint"))
+        self.lang_btn.clicked.connect(lambda: self.language_toggle_requested.emit())
+        config_row.addWidget(self.lang_btn)
+        root.addLayout(config_row)
 
         root.addSpacing(8)
         section_row = QHBoxLayout()
@@ -87,7 +106,7 @@ class SidePanel(QFrame):
 
     # ------------------------------------------------------------ rebuild
     def set_channels(self, channels: list[dict]) -> None:
-        """channels: [{key, title, ...}] — newest first (as store.list gives)."""
+        """channels: [{key, title, members, ...}] — sorted here by members desc."""
         for btn in self._channel_btns.values():
             self.group.removeButton(btn)
             btn.deleteLater()
@@ -96,10 +115,14 @@ class SidePanel(QFrame):
         # Everything before the trailing stretch gets cleared except empty_lbl.
         self.empty_lbl.setVisible(not channels)
 
+        channels = sorted(channels, key=lambda c: c.get("members", 0) or 0, reverse=True)
+
         self._compare_keys.clear()
         for ch in channels:
             btn = NavButton("reports", ch.get("title") or ch.get("key", "?"))
             btn.setToolTip(ch.get("channel") or ch.get("title", ""))
+            members = ch.get("members", 0) or 0
+            btn.set_meta(short_num(members, 1) if members else "")
             key = ch["key"]
             btn.clicked.connect(lambda _=False, k=key: self._on_channel_clicked(k))
             self.group.addButton(btn)
@@ -156,3 +179,6 @@ class SidePanel(QFrame):
         self.empty_lbl.setText(self.i18n.tr("nav_no_channels"))
         self.compare_btn.setText(self.i18n.tr("nav_compare"))
         self.compare_btn.setToolTip(self.i18n.tr("nav_compare_hint"))
+        self.fold_btn.setToolTip(self.i18n.tr("nav_fold_hint"))
+        self.lang_btn.setText(self.i18n.lang.upper())
+        self.lang_btn.setToolTip(self.i18n.tr("nav_lang_hint"))

@@ -144,7 +144,7 @@ class ConfigView(QWidget):
 
         self.period_combo = QComboBox()
         self.period_combo.addItems([self.tr_(f"period_{k}") for k in PERIOD_KEYS])
-        self.period_combo.setCurrentIndex(2)  # 1 year
+        self.period_combo.setCurrentIndex(3)  # 2 years
         form.addRow(self.tr_("fetch_period"), self.period_combo)
         card.body.addLayout(form)
 
