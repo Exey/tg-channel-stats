@@ -3,6 +3,29 @@ from __future__ import annotations
 
 import asyncio
 import os
+import re
+
+# https://t.me/username, t.me/c/12345(/msg), telegram.me/…, with or without
+# a trailing /<message id> — Telethon's own parser only handles the plain
+# @username form, so links copied straight from the Telegram app (which
+# often include a message id or the private-channel /c/ prefix) fail there.
+_TME_RE = re.compile(
+    r"^(?:https?://)?(?:www\.)?(?:t\.me|telegram\.(?:me|dog))/(c/)?([^/?#\s]+)",
+    re.IGNORECASE)
+
+
+def normalize_channel_ref(value: str) -> str:
+    """Strip a t.me/telegram.me link down to a bare @username or numeric ID
+    so it resolves exactly like typing the username/ID directly would.
+    Anything that isn't a t.me-style link passes through unchanged."""
+    v = str(value).strip()
+    m = _TME_RE.match(v)
+    if not m:
+        return v
+    is_private, ident = m.group(1), m.group(2)
+    if is_private:
+        return ident if ident.startswith("-") else f"-100{ident}"
+    return f"@{ident}"
 
 
 async def retry(ctx, coro, *args, **kwargs):
@@ -44,7 +67,7 @@ async def resolve_entity(client, value):
     """
     from telethon.tl.types import PeerChannel
 
-    v = str(value).strip()
+    v = normalize_channel_ref(value)
     if not v:
         raise ValueError("Empty channel/chat identifier")
     try:

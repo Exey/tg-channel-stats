@@ -187,6 +187,7 @@ async def run_channel_stat(client, p: dict, ctx) -> str:
     views_settled_n = 0
     sum_views_last_year = 0
     sum_forwards_last_year = 0
+    views_seen: list[int] = []  # per-post views, for the viral-share pass below
     with_media = with_photo = with_document = 0
     hour_dist = [0] * 24
     weekday_dist = [0] * 7
@@ -202,6 +203,7 @@ async def run_channel_stat(client, p: dict, ctx) -> str:
         nonlocal with_media, with_photo, with_document, first_ts, last_ts
         posts += 1
         v = row["views"]
+        views_seen.append(v)
         if v > 0:
             sum_views += v
             views_n += 1
@@ -287,9 +289,12 @@ async def run_channel_stat(client, p: dict, ctx) -> str:
         last_iso = datetime.fromtimestamp(last_ts, timezone.utc).isoformat()
     else:
         total_days, first_iso, last_iso = 0, "", ""
+    avg_views_raw = sum_views / views_n if views_n else 0
+    viral_count = sum(1 for v in views_seen if v > 2 * avg_views_raw) if avg_views_raw else 0
     stats = {
         "total_posts": posts,
         "avg_views": round(sum_views / views_n, 1) if views_n else 0,
+        "viral_post_share": round(viral_count / posts * 100, 1) if posts else 0,
         "max_views": max_views,
         "avg_reactions": round(sum_reactions / posts, 1) if posts else 0,
         "avg_reposts": round(sum_forwards / posts, 1) if posts else 0,

@@ -22,12 +22,20 @@ _METRICS = [
     ("max_views", "cmp_max_views"),
     ("views_last_year", "cmp_view_repost_year"),
     ("posts_per_day", "cmp_posts_per_day"),
-    ("avg_reposts", "stat_avg_reposts"),
     ("reposts_per_post", "stat_reposts_per_post"),
     ("max_reposts", "cmp_max_reposts"),
     ("avg_reactions", "cmp_avg_reactions"),
     ("err_pct", "stat_err_pct"),
+    ("virality_index", "cmp_virality_index"),
+    ("viral_post_share", "cmp_viral_share"),
 ]
+
+# card key -> i18n key for an explanatory tooltip (only the two least
+# self-explanatory cards need one).
+_TOOLTIPS = {
+    "virality_index": "cmp_virality_index_tip",
+    "viral_post_share": "cmp_viral_share_tip",
+}
 
 _CARD_HEIGHT = round(132 * 0.6 * 0.9)  # -40%, then another -10%
 MAX_COMPARE = 6
@@ -54,8 +62,10 @@ class CompareView(QWidget):
     def retranslate(self) -> None:
         for key, title_key in _METRICS:
             title = self._metric_title(key, title_key)
+            tip = self.tr_(_TOOLTIPS[key]) if key in _TOOLTIPS else ""
             for col in self._columns:
                 col["cards"][key].title_lbl.setText(title)
+                col["cards"][key].setToolTip(tip)
 
     def _build_ui(self) -> None:
         outer = QVBoxLayout(self)
@@ -76,15 +86,22 @@ class CompareView(QWidget):
         for _ in range(MAX_COMPARE):
             col_lay = QVBoxLayout()
             col_lay.setSpacing(14)
+            name_row = QHBoxLayout()
             name_lbl = QLabel("—")
             name_lbl.setObjectName("sectionTitle")
-            col_lay.addWidget(name_lbl)
+            name_row.addWidget(name_lbl, 1)
+            crown_lbl = QLabel("👑")
+            crown_lbl.setVisible(False)
+            name_row.addWidget(crown_lbl)
+            col_lay.addLayout(name_row)
             cards = {}
             for key, title_key in _METRICS:
                 title = self._metric_title(key, title_key)
                 card = StatCard(title)
                 card.setMinimumHeight(_CARD_HEIGHT)
                 card.set_compact(True)
+                if key in _TOOLTIPS:
+                    card.setToolTip(self.tr_(_TOOLTIPS[key]))
                 cards[key] = card
                 col_lay.addWidget(card)
             col_lay.addStretch()
@@ -92,7 +109,8 @@ class CompareView(QWidget):
             holder.setLayout(col_lay)
             holder.setMinimumWidth(200)
             columns.addWidget(holder, 1)
-            self._columns.append({"holder": holder, "name": name_lbl, "cards": cards})
+            self._columns.append({"holder": holder, "name": name_lbl,
+                                  "crown": crown_lbl, "cards": cards})
 
     def load(self, datas: list[dict]) -> None:
         datas = datas[:MAX_COMPARE]
@@ -115,18 +133,20 @@ class CompareView(QWidget):
             if avg_views_settled is None:
                 avg_views_settled = avg_views
             views_ly = stats.get("last_year_views", 0) or 0
+            max_views = stats.get("max_views", 0) or 0
             vals = {
                 "members": members,
                 "avg_views": avg_views,
-                "max_views": stats.get("max_views", 0) or 0,
+                "max_views": max_views,
                 "posts_per_day": stats.get("avg_posts_per_day", 0) or 0,
                 "avg_reactions": stats.get("avg_reactions", 0) or 0,
-                "avg_reposts": avg_reposts,
                 "max_reposts": stats.get("max_reposts", 0) or 0,
                 "views_per_member": (avg_views / members) if members else 0,
                 "reposts_per_post": avg_reposts,
                 "err_pct": (avg_views_settled / members * 100) if members else 0,
                 "views_last_year": views_ly,
+                "virality_index": (max_views / avg_views) if avg_views else 0,
+                "viral_post_share": stats.get("viral_post_share", 0) or 0,
             }
             raw.append(vals)
             name = data.get("title") or data.get("channel") or "—"
@@ -137,13 +157,14 @@ class CompareView(QWidget):
             col["cards"]["max_views"].set_value(fmt_int(vals["max_views"]))
             col["cards"]["posts_per_day"].set_value(str(vals["posts_per_day"]))
             col["cards"]["avg_reactions"].set_value(fmt_int(round(vals["avg_reactions"])))
-            col["cards"]["avg_reposts"].set_value(fmt_int(round(vals["avg_reposts"])))
             col["cards"]["max_reposts"].set_value(fmt_int(vals["max_reposts"]))
             col["cards"]["views_per_member"].set_value(f"{vals['views_per_member']:.2f}")
             col["cards"]["reposts_per_post"].set_value(fmt_int(round(vals["reposts_per_post"])))
             col["cards"]["err_pct"].set_value(f"{vals['err_pct']:.1f}%")
             col["cards"]["views_last_year"].set_value(
                 f"{short_num(views_ly, 2)} 👁" if views_ly else "—")
+            col["cards"]["virality_index"].set_value(f"{vals['virality_index']:.2f}×")
+            col["cards"]["viral_post_share"].set_value(f"{vals['viral_post_share']:.1f}%")
 
         shown = self._columns[:len(raw)]
         win_counts = [0] * len(shown)
@@ -160,4 +181,5 @@ class CompareView(QWidget):
         best = max(win_counts) if win_counts else 0
         overall = win_counts.index(best) if best > 0 and win_counts.count(best) == 1 else None
         for i, col in enumerate(shown):
-            col["name"].setText(f"{names[i]} 👑" if i == overall else names[i])
+            col["name"].setText(names[i])
+            col["crown"].setVisible(i == overall)

@@ -127,6 +127,15 @@ EN = {
     "cmp_max_reposts": "Max repost / post",
     "cmp_avg_reactions": "Avg. reactions / post",
     "cmp_view_repost_year": "Views {year}",
+    "cmp_virality_index": "Virality index",
+    "cmp_virality_index_tip": "Max views ÷ avg. views — the spread between the "
+                              "best-performing post and the average. A high "
+                              "value means the channel can occasionally produce "
+                              "“viral hits” that far outperform its "
+                              "normal content.",
+    "cmp_viral_share": "Viral post share",
+    "cmp_viral_share_tip": "The percentage of posts that received more than "
+                           "2× the average number of views.",
     # charts
     "chart_activity": "Month activity",
     "chart_by_hour": "Posts by hour of day",
@@ -282,6 +291,15 @@ RU = {
     "cmp_max_reposts": "Макс. репост / пост",
     "cmp_avg_reactions": "Ср. реакции / пост",
     "cmp_view_repost_year": "Просмотры {year}",
+    "cmp_virality_index": "Индекс виральности",
+    "cmp_virality_index_tip": "Макс. просмотры ÷ ср. просмотры — разброс между "
+                              "лучшим постом и средним. Высокое значение "
+                              "значит, что канал способен иногда выдавать "
+                              "«вирусные» посты, значительно превосходящие "
+                              "обычный контент.",
+    "cmp_viral_share": "Доля вирусных постов",
+    "cmp_viral_share_tip": "Процент постов, набравших более чем в 2 раза "
+                           "больше среднего числа просмотров.",
     "chart_activity": "Активность по месяцам",
     "chart_by_hour": "Посты по часам суток",
     "chart_by_weekday": "Посты по дням недели",
