@@ -11,6 +11,7 @@ from PySide6.QtWidgets import (
 from ..config import Config, config_dir
 from ..i18n import I18n
 from ..store import ChannelStore
+from .compare_view import CompareView
 from .config_view import ConfigView
 from .dashboard_view import DashboardView
 from .side_panel import SidePanel
@@ -48,6 +49,8 @@ class MainWindow(QMainWindow):
         self.side = SidePanel(self.i18n)
         self.side.config_selected.connect(self._show_config)
         self.side.channel_selected.connect(self._show_channel)
+        self.side.compare_requested.connect(self._show_compare)
+        self.side.compare_mode_off.connect(self._on_compare_mode_off)
         lay.addWidget(self.side)
 
         self.stack = QStackedWidget()
@@ -56,8 +59,10 @@ class MainWindow(QMainWindow):
         self.dashboard = DashboardView(self.i18n)
         self.dashboard.refetch_requested.connect(self._on_refetch)
         self.dashboard.remove_requested.connect(self._on_remove)
+        self.compare = CompareView(self.i18n)
         self.stack.addWidget(self.config_view)   # index 0
         self.stack.addWidget(self.dashboard)     # index 1
+        self.stack.addWidget(self.compare)       # index 2
         lay.addWidget(self.stack, 1)
 
         self.setCentralWidget(central)
@@ -132,6 +137,22 @@ class MainWindow(QMainWindow):
         self.side.select_channel(key)
         self.dashboard.load(data)
         self.stack.setCurrentWidget(self.dashboard)
+
+    def _show_compare(self, keys: list[str]) -> None:
+        # Compare is an overlay on top of whatever channel/config was open —
+        # _current_key is left untouched so turning compare mode back off
+        # (see _on_compare_mode_off) returns to it.
+        datas = [self.store.load(k) for k in keys]
+        if not all(datas):
+            return
+        self.compare.load(datas)
+        self.stack.setCurrentWidget(self.compare)
+
+    def _on_compare_mode_off(self) -> None:
+        if self._current_key and self.side.has_channel(self._current_key):
+            self._show_channel(self._current_key)
+        else:
+            self._show_config()
 
     def _on_channel_fetched(self, payload: dict) -> None:
         key = self.store.save(payload)

@@ -42,6 +42,7 @@ LIGHT = {
     "good": "#22C55E",
     "warn": "#F59E0B",
     "hot": "#F04438",
+    "win": "#F2C230",
     "hour": "#1B59F8",
     "weekday": "#7C4DFF",
     "activity": "#1B59F8",
@@ -68,6 +69,7 @@ DARK = {
     "good": "#34D399",
     "warn": "#FBBF24",
     "hot": "#F87171",
+    "win": "#F2C230",
     "hour": "#4C8DFF",
     "weekday": "#9D7BFF",
     "activity": "#4C8DFF",
@@ -236,6 +238,9 @@ def build_qss() -> str:
     }}
     QPushButton#ghost {{ border: none; background: transparent; color: {c['muted']}; }}
     QPushButton#ghost:hover {{ color: {c['accent']}; }}
+    QPushButton#ghost:checked {{
+        color: {c['accent']}; background: {c['accent_soft']}; border-radius: 8px;
+    }}
 
     /* ---------------- table ---------------- */
     QTableWidget {{

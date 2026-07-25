@@ -62,6 +62,11 @@ class StatCard(Card):
             self.spark.set_data(spark)
             self.spark.setVisible(bool(spark))
 
+    def set_highlighted(self, on: bool) -> None:
+        """Gold border — used by compare mode to mark the winning metric."""
+        self.setStyleSheet(
+            f"QFrame#card {{ border: 2px solid {COLORS['win']}; }}" if on else "")
+
 
 class ChartCard(Card):
     """A titled card that hosts a chart (or any content widget)."""

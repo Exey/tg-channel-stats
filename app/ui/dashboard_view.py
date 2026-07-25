@@ -193,8 +193,8 @@ class DashboardView(QWidget):
             ("max_views", "stat_max_views"),
             ("posts_per_day", "stat_posts_per_day"),
             ("avg_reactions", "stat_avg_reactions"),
-            ("media_pct", "stat_media_pct"),
-            ("created", "stat_created"),
+            ("avg_reposts", "stat_avg_reposts"),
+            ("max_reposts", "stat_max_reposts"),
         ]
         for i, (key, title_key) in enumerate(specs):
             accent = COLORS["accent"] if key != "total_posts" else COLORS["activity"]
@@ -235,7 +235,7 @@ class DashboardView(QWidget):
         header.setSectionsClickable(True)
         header.sectionClicked.connect(self._on_header_clicked)
         self.table.cellDoubleClicked.connect(self._open_row)
-        self.table.setMinimumHeight(320)
+        self.table.setMinimumHeight(640)
         self.table_card.body.addWidget(self.table)
         self.body.addWidget(self.table_card)
 
@@ -259,6 +259,9 @@ class DashboardView(QWidget):
         period = self._data.get("period") or "all"
         parts.append(self.tr_("dash_period_label",
                               period=self.tr_(f"period_{period}")))
+        created = self._fmt_date(self._data.get("info", {}).get("created", ""))
+        if created:
+            parts.append(self.tr_("dash_created_label", when=created))
         when = self._fmt_datetime(self._data.get("fetched_at", ""))
         if when:
             parts.append(self.tr_("dash_fetched_at", when=when))
@@ -274,6 +277,8 @@ class DashboardView(QWidget):
 
         self._cards["members"].set_value(
             fmt_int(info.get("members", 0)) if info.get("members") else "—")
+        self._cards["total_posts"].title_lbl.setText(
+            self.tr_("stat_total_posts_period", period=self._period_text()))
         self._cards["total_posts"].set_value(
             fmt_int(stats.get("total_posts", 0)),
             spark=monthly if len(monthly) > 2 else None)
@@ -281,15 +286,57 @@ class DashboardView(QWidget):
         self._cards["max_views"].set_value(fmt_int(stats.get("max_views", 0)))
         self._cards["posts_per_day"].set_value(str(stats.get("avg_posts_per_day", 0)))
         self._cards["avg_reactions"].set_value(fmt_int(round(stats.get("avg_reactions", 0))))
-        self._cards["media_pct"].set_value(f"{stats.get('media_pct', 0)}%")
-        self._cards["created"].set_value(self._fmt_date(info.get("created", "")) or "—")
+        self._cards["avg_reposts"].set_value(fmt_int(round(stats.get("avg_reposts", 0))))
+        self._cards["max_reposts"].set_value(fmt_int(stats.get("max_reposts", 0)))
+
+    # ------------------------------------------------------ period wording
+    def _unit_word(self, n: int, unit: str) -> str:
+        if self.i18n.lang == "ru":
+            one, few, many = {
+                "year": ("год", "года", "лет"),
+                "month": ("месяц", "месяца", "месяцев"),
+                "day": ("день", "дня", "дней"),
+            }[unit]
+            n_abs = abs(n) % 100
+            n1 = n_abs % 10
+            if 11 <= n_abs <= 14:
+                return many
+            if n1 == 1:
+                return one
+            if 2 <= n1 <= 4:
+                return few
+            return many
+        single, plural = {
+            "year": ("year", "years"),
+            "month": ("month", "months"),
+            "day": ("day", "days"),
+        }[unit]
+        return single if n == 1 else plural
+
+    def _format_span(self, days: int) -> str:
+        days = max(int(days or 0), 0)
+        years, rem = divmod(days, 365)
+        months = rem // 30
+        if years == 0 and months == 0:
+            return f"{rem} {self._unit_word(rem, 'day')}"
+        parts = []
+        if years:
+            parts.append(f"{years} {self._unit_word(years, 'year')}")
+        if months:
+            parts.append(f"{months} {self._unit_word(months, 'month')}")
+        return " ".join(parts)
+
+    def _period_text(self) -> str:
+        days = self._data.get("stats", {}).get("total_days") or 0
+        return self._format_span(days) if days else self.tr_("period_all")
 
     def _fill_charts(self) -> None:
         dist = self._data.get("distributions", {})
         monthly = dist.get("monthly", [])
         m_vals = [m["count"] for m in monthly]
         m_labels = [self._month_label(m["label"]) for m in monthly]
-        self.activity_chart.set_data(m_vals, m_labels,
+        m_tooltips = [f"{m['label']}: {m['count']}" for m in monthly]
+        self.activity_chart.set_data(m_vals, m_labels, tooltips=m_tooltips,
                                      empty_text=self.tr_("chart_empty"))
 
         hours = dist.get("hour", [0] * 24)
@@ -517,14 +564,14 @@ class DashboardView(QWidget):
         self.table.setHorizontalHeaderLabels([
             self.tr_("col_date"), self.tr_("col_post"), self.tr_("col_views"),
             self.tr_("col_reactions"), self.tr_("col_private"), self.tr_("col_public")])
-        titles = ["members", "total_posts", "avg_views", "max_views",
-                  "posts_per_day", "avg_reactions", "media_pct", "created"]
-        keymap = {"members": "stat_members", "total_posts": "stat_total_posts",
-                  "avg_views": "stat_avg_views", "max_views": "stat_max_views",
-                  "posts_per_day": "stat_posts_per_day",
-                  "avg_reactions": "stat_avg_reactions",
-                  "media_pct": "stat_media_pct", "created": "stat_created"}
-        for k in titles:
-            self._cards[k].title_lbl.setText(self.tr_(keymap[k]))
+        keymap = {"members": "stat_members", "avg_views": "stat_avg_views",
+                  "max_views": "stat_max_views", "posts_per_day": "stat_posts_per_day",
+                  "avg_reactions": "stat_avg_reactions", "avg_reposts": "stat_avg_reposts",
+                  "max_reposts": "stat_max_reposts"}
+        for k, key in keymap.items():
+            self._cards[k].title_lbl.setText(self.tr_(key))
+        self._cards["total_posts"].title_lbl.setText(
+            self.tr_("stat_total_posts_period",
+                     period=self._period_text() if self._data else ""))
         if self._data:
             self.sub_lbl.setText(self._header_sub())

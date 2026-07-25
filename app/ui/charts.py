@@ -13,7 +13,7 @@ from PySide6.QtCore import QPointF, QRectF, Qt
 from PySide6.QtGui import (
     QBrush, QColor, QFont, QLinearGradient, QPainter, QPainterPath, QPen,
 )
-from PySide6.QtWidgets import QSizePolicy, QWidget
+from PySide6.QtWidgets import QSizePolicy, QToolTip, QWidget
 
 from .theme import COLORS
 
@@ -32,37 +32,50 @@ def _nice_ceiling(value: float) -> int:
 
 
 class BarChart(QWidget):
+    PAD_L, PAD_R, PAD_T, PAD_B = 44, 8, 14, 26
+
     def __init__(self, values=None, labels=None, accent: str | None = None,
-                 max_labels: int = 14, value_fmt=str, parent=None) -> None:
+                 max_labels: int = 14, value_fmt=str, tooltips=None,
+                 parent=None) -> None:
         super().__init__(parent)
         self._values = list(values or [])
         self._labels = list(labels or [])
+        self._tooltips = list(tooltips or [])
         self._accent = accent or COLORS["accent"]
         self._max_labels = max_labels
         self._value_fmt = value_fmt
         self._empty_text = "No data"
         self.setMinimumHeight(240)
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
+        self.setMouseTracking(True)
 
     def set_data(self, values, labels=None, accent: str | None = None,
-                 empty_text: str | None = None) -> None:
+                 empty_text: str | None = None, tooltips=None) -> None:
         self._values = list(values or [])
         if labels is not None:
             self._labels = list(labels)
+        if tooltips is not None:
+            self._tooltips = list(tooltips)
+        elif labels is not None:
+            self._tooltips = []
         if accent:
             self._accent = accent
         if empty_text is not None:
             self._empty_text = empty_text
         self.update()
 
+    def _plot_rect(self) -> QRectF:
+        w, h = self.width(), self.height()
+        return QRectF(self.PAD_L, self.PAD_T,
+                      w - self.PAD_L - self.PAD_R, h - self.PAD_T - self.PAD_B)
+
     # ------------------------------------------------------------- paint
     def paintEvent(self, _event) -> None:
         p = QPainter(self)
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
-        w, h = self.width(), self.height()
 
-        pad_l, pad_r, pad_t, pad_b = 44, 8, 14, 26
-        plot = QRectF(pad_l, pad_t, w - pad_l - pad_r, h - pad_t - pad_b)
+        pad_l = self.PAD_L
+        plot = self._plot_rect()
 
         if not self._values or max(self._values) <= 0:
             p.setPen(QColor(COLORS["faint"]))
@@ -120,6 +133,40 @@ class BarChart(QWidget):
                 p.drawText(QRectF(cx - slot / 2, plot.bottom() + 4, slot, 18),
                            Qt.AlignmentFlag.AlignCenter, str(self._labels[i]))
         p.end()
+
+    # ---------------------------------------------------------- tooltip
+    def mouseMoveEvent(self, event) -> None:
+        idx = self._bar_at(event.position() if hasattr(event, "position")
+                           else event.pos())
+        if idx is None:
+            QToolTip.hideText()
+        else:
+            pos = (event.globalPosition().toPoint() if hasattr(event, "globalPosition")
+                   else event.globalPos())
+            QToolTip.showText(pos, self._tooltip_text(idx), self)
+        super().mouseMoveEvent(event)
+
+    def leaveEvent(self, event) -> None:
+        QToolTip.hideText()
+        super().leaveEvent(event)
+
+    def _bar_at(self, pos) -> int | None:
+        if not self._values:
+            return None
+        plot = self._plot_rect()
+        x, y = pos.x(), pos.y()
+        if x < plot.left() or x > plot.right() or y < plot.top() or y > plot.bottom():
+            return None
+        n = len(self._values)
+        slot = plot.width() / n
+        return min(n - 1, max(0, int((x - plot.left()) // slot))) if slot else None
+
+    def _tooltip_text(self, idx: int) -> str:
+        if idx < len(self._tooltips) and self._tooltips[idx]:
+            return self._tooltips[idx]
+        label = self._labels[idx] if idx < len(self._labels) else ""
+        value = self._value_fmt(self._values[idx])
+        return f"{label}: {value}" if label else str(value)
 
     @staticmethod
     def _short_num(v: float) -> str:

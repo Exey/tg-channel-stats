@@ -9,9 +9,11 @@ from __future__ import annotations
 
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
-    QButtonGroup, QFrame, QLabel, QScrollArea, QVBoxLayout, QWidget,
+    QButtonGroup, QFrame, QHBoxLayout, QLabel, QPushButton, QScrollArea,
+    QVBoxLayout, QWidget,
 )
 
+from .compare_view import MAX_COMPARE
 from .theme import COLORS
 from .widgets import NavButton, hline
 
@@ -19,12 +21,16 @@ from .widgets import NavButton, hline
 class SidePanel(QFrame):
     config_selected = Signal()
     channel_selected = Signal(str)   # checkpoint key
+    compare_requested = Signal(list)  # exactly 2 checkpoint keys
+    compare_mode_off = Signal()
 
     def __init__(self, i18n, parent=None) -> None:
         super().__init__(parent)
         self.i18n = i18n
         self.setObjectName("sidebar")
         self.setFixedWidth(256)
+        self.compare_mode = False
+        self._compare_keys: list[str] = []
 
         root = QVBoxLayout(self)
         root.setContentsMargins(16, 22, 16, 18)
@@ -47,9 +53,18 @@ class SidePanel(QFrame):
         root.addWidget(self.config_btn)
 
         root.addSpacing(8)
+        section_row = QHBoxLayout()
         self.section_lbl = QLabel(i18n.tr("nav_channels"))
         self.section_lbl.setObjectName("sectionLabel")
-        root.addWidget(self.section_lbl)
+        section_row.addWidget(self.section_lbl)
+        section_row.addStretch()
+        self.compare_btn = QPushButton(i18n.tr("nav_compare"))
+        self.compare_btn.setObjectName("ghost")
+        self.compare_btn.setCheckable(True)
+        self.compare_btn.setToolTip(i18n.tr("nav_compare_hint"))
+        self.compare_btn.toggled.connect(self._toggle_compare_mode)
+        section_row.addWidget(self.compare_btn)
+        root.addLayout(section_row)
         root.addWidget(hline())
 
         # Scrollable channel list.
@@ -81,15 +96,44 @@ class SidePanel(QFrame):
         # Everything before the trailing stretch gets cleared except empty_lbl.
         self.empty_lbl.setVisible(not channels)
 
+        self._compare_keys.clear()
         for ch in channels:
             btn = NavButton("reports", ch.get("title") or ch.get("key", "?"))
             btn.setToolTip(ch.get("channel") or ch.get("title", ""))
             key = ch["key"]
-            btn.clicked.connect(lambda _=False, k=key: self.channel_selected.emit(k))
+            btn.clicked.connect(lambda _=False, k=key: self._on_channel_clicked(k))
             self.group.addButton(btn)
             # insert above the stretch (last item)
             self.list_lay.insertWidget(self.list_lay.count() - 1, btn)
             self._channel_btns[key] = btn
+        self.group.setExclusive(not self.compare_mode)
+
+    # ------------------------------------------------------------- compare
+    def _toggle_compare_mode(self, on: bool) -> None:
+        self.compare_mode = on
+        self._compare_keys.clear()
+        self.group.setExclusive(not on)
+        for btn in self._channel_btns.values():
+            btn.setChecked(False)
+        if on:
+            self.config_btn.setChecked(False)
+        else:
+            self.compare_mode_off.emit()
+
+    def _on_channel_clicked(self, key: str) -> None:
+        if not self.compare_mode:
+            self.channel_selected.emit(key)
+            return
+        btn = self._channel_btns[key]
+        if btn.isChecked():
+            if len(self._compare_keys) >= MAX_COMPARE:
+                stale = self._compare_keys.pop(0)
+                self._channel_btns[stale].setChecked(False)
+            self._compare_keys.append(key)
+        elif key in self._compare_keys:
+            self._compare_keys.remove(key)
+        if len(self._compare_keys) >= 2:
+            self.compare_requested.emit(list(self._compare_keys))
 
     # ------------------------------------------------------------- select
     def select_config(self) -> None:
@@ -110,3 +154,5 @@ class SidePanel(QFrame):
         self.config_btn.set_text(self.i18n.tr("nav_config"))
         self.section_lbl.setText(self.i18n.tr("nav_channels"))
         self.empty_lbl.setText(self.i18n.tr("nav_no_channels"))
+        self.compare_btn.setText(self.i18n.tr("nav_compare"))
+        self.compare_btn.setToolTip(self.i18n.tr("nav_compare_hint"))

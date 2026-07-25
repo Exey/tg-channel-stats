@@ -30,6 +30,11 @@ HEARTBEAT_EVERY = 500
 # treats a missing key as "no limit".
 PERIOD_DAYS = {"3m": 90, "6m": 182, "1y": 365, "2y": 730, "3y": 1095}
 
+# ERR% (engagement rate by reach) only looks at posts old enough that their
+# view count has settled — freshly-posted messages are still accumulating
+# views and would understate the rate.
+ERR_MIN_AGE_DAYS = 14
+
 WEEKDAYS = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday",
             "Saturday", "Sunday"]
 
@@ -167,6 +172,7 @@ async def run_channel_stat(client, p: dict, ctx) -> str:
     scanned = 0
     current: dict | None = None   # album row currently being accumulated
     current_gid = None
+    err_cutoff = datetime.now(timezone.utc) - timedelta(days=ERR_MIN_AGE_DAYS)
 
     # Activity accumulators (per merged post).
     posts = 0
@@ -174,6 +180,10 @@ async def run_channel_stat(client, p: dict, ctx) -> str:
     views_n = 0
     max_views = 0
     sum_reactions = 0
+    sum_forwards = 0
+    max_forwards = 0
+    sum_views_settled = 0
+    views_settled_n = 0
     with_media = with_photo = with_document = 0
     hour_dist = [0] * 24
     weekday_dist = [0] * 7
@@ -184,14 +194,20 @@ async def run_channel_stat(client, p: dict, ctx) -> str:
     def _account(row: dict, msg) -> None:
         """Fold one *new* merged post into the activity stats."""
         nonlocal posts, sum_views, views_n, max_views, sum_reactions
+        nonlocal sum_forwards, max_forwards, sum_views_settled, views_settled_n
         nonlocal with_media, with_photo, with_document, first_ts, last_ts
         posts += 1
         v = row["views"]
         if v > 0:
             sum_views += v
             views_n += 1
+            if msg.date and msg.date < err_cutoff:
+                sum_views_settled += v
+                views_settled_n += 1
         max_views = max(max_views, v)
         sum_reactions += row["reactions"]
+        sum_forwards += row["forwards"]
+        max_forwards = max(max_forwards, row["forwards"])
         if getattr(msg, "media", None) is not None:
             with_media += 1
         if getattr(msg, "photo", None) is not None:
@@ -269,6 +285,10 @@ async def run_channel_stat(client, p: dict, ctx) -> str:
         "avg_views": round(sum_views / views_n, 1) if views_n else 0,
         "max_views": max_views,
         "avg_reactions": round(sum_reactions / posts, 1) if posts else 0,
+        "avg_reposts": round(sum_forwards / posts, 1) if posts else 0,
+        "max_reposts": max_forwards,
+        "avg_views_settled": round(sum_views_settled / views_settled_n, 1)
+                             if views_settled_n else 0,
         "avg_posts_per_day": round(posts / total_days, 2) if total_days else 0,
         "posts_with_media": with_media,
         "posts_with_photo": with_photo,
