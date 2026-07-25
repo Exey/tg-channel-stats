@@ -20,13 +20,13 @@ _METRICS = [
     ("avg_views", "stat_avg_views"),
     ("views_per_member", "stat_views_per_member"),
     ("max_views", "cmp_max_views"),
+    ("views_last_year", "cmp_view_repost_year"),
     ("posts_per_day", "cmp_posts_per_day"),
     ("avg_reposts", "stat_avg_reposts"),
     ("reposts_per_post", "stat_reposts_per_post"),
     ("max_reposts", "cmp_max_reposts"),
     ("avg_reactions", "cmp_avg_reactions"),
     ("err_pct", "stat_err_pct"),
-    ("view_repost_last_year", "cmp_view_repost_year"),
 ]
 
 _CARD_HEIGHT = round(132 * 0.6 * 0.9)  # -40%, then another -10%
@@ -42,6 +42,20 @@ class CompareView(QWidget):
 
     def tr_(self, key: str, **kw) -> str:
         return self.i18n.tr(key, **kw)
+
+    def _metric_title(self, key: str, title_key: str) -> str:
+        title = self.tr_(title_key)
+        if key == "err_pct":
+            title = f"{title} ({self.tr_('stat_err_pct_sub')})"
+        elif key == "views_last_year":
+            title = self.tr_(title_key, year=LAST_FULL_YEAR)
+        return title
+
+    def retranslate(self) -> None:
+        for key, title_key in _METRICS:
+            title = self._metric_title(key, title_key)
+            for col in self._columns:
+                col["cards"][key].title_lbl.setText(title)
 
     def _build_ui(self) -> None:
         outer = QVBoxLayout(self)
@@ -67,11 +81,7 @@ class CompareView(QWidget):
             col_lay.addWidget(name_lbl)
             cards = {}
             for key, title_key in _METRICS:
-                title = self.tr_(title_key)
-                if key == "err_pct":
-                    title = f"{title} ({self.tr_('stat_err_pct_sub')})"
-                elif key == "view_repost_last_year":
-                    title = self.tr_(title_key, year=LAST_FULL_YEAR)
+                title = self._metric_title(key, title_key)
                 card = StatCard(title)
                 card.setMinimumHeight(_CARD_HEIGHT)
                 card.set_compact(True)
@@ -105,7 +115,6 @@ class CompareView(QWidget):
             if avg_views_settled is None:
                 avg_views_settled = avg_views
             views_ly = stats.get("last_year_views", 0) or 0
-            reposts_ly = stats.get("last_year_reposts", 0) or 0
             vals = {
                 "members": members,
                 "avg_views": avg_views,
@@ -117,8 +126,7 @@ class CompareView(QWidget):
                 "views_per_member": (avg_views / members) if members else 0,
                 "reposts_per_post": avg_reposts,
                 "err_pct": (avg_views_settled / members * 100) if members else 0,
-                # winner = whoever converts views to reposts best, not raw totals
-                "view_repost_last_year": (reposts_ly / views_ly) if views_ly else 0,
+                "views_last_year": views_ly,
             }
             raw.append(vals)
             name = data.get("title") or data.get("channel") or "—"
@@ -134,9 +142,8 @@ class CompareView(QWidget):
             col["cards"]["views_per_member"].set_value(f"{vals['views_per_member']:.2f}")
             col["cards"]["reposts_per_post"].set_value(fmt_int(round(vals["reposts_per_post"])))
             col["cards"]["err_pct"].set_value(f"{vals['err_pct']:.1f}%")
-            col["cards"]["view_repost_last_year"].set_value(
-                f"{short_num(views_ly, 2)} 👁 / {short_num(reposts_ly, 2)} 🔄"
-                if views_ly else "—")
+            col["cards"]["views_last_year"].set_value(
+                f"{short_num(views_ly, 2)} 👁" if views_ly else "—")
 
         shown = self._columns[:len(raw)]
         win_counts = [0] * len(shown)

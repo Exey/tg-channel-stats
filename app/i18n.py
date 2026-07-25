@@ -126,7 +126,7 @@ EN = {
     "cmp_posts_per_day": "Post / day",
     "cmp_max_reposts": "Max repost / post",
     "cmp_avg_reactions": "Avg. reactions / post",
-    "cmp_view_repost_year": "Views / Reposts {year}",
+    "cmp_view_repost_year": "Views {year}",
     # charts
     "chart_activity": "Month activity",
     "chart_by_hour": "Posts by hour of day",
@@ -281,7 +281,7 @@ RU = {
     "cmp_posts_per_day": "Постов / день",
     "cmp_max_reposts": "Макс. репост / пост",
     "cmp_avg_reactions": "Ср. реакции / пост",
-    "cmp_view_repost_year": "Просмотры / Репосты {year}",
+    "cmp_view_repost_year": "Просмотры {year}",
     "chart_activity": "Активность по месяцам",
     "chart_by_hour": "Посты по часам суток",
     "chart_by_weekday": "Посты по дням недели",

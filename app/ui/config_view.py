@@ -46,12 +46,12 @@ class ConfigView(QWidget):
 
         header = QVBoxLayout()
         header.setSpacing(2)
-        title = QLabel(self.tr_("nav_config"))
-        title.setObjectName("pageTitle")
-        header.addWidget(title)
-        sub = QLabel(self.tr_("app_title"))
-        sub.setObjectName("pageSub")
-        header.addWidget(sub)
+        self.title_lbl = QLabel(self.tr_("nav_config"))
+        self.title_lbl.setObjectName("pageTitle")
+        header.addWidget(self.title_lbl)
+        self.sub_lbl = QLabel(self.tr_("app_title"))
+        self.sub_lbl.setObjectName("pageSub")
+        header.addWidget(self.sub_lbl)
         outer.addLayout(header)
 
         scroll = QScrollArea()
@@ -73,39 +73,40 @@ class ConfigView(QWidget):
         card = SectionCard("Telegram")
 
         prow = QHBoxLayout()
-        prow.addWidget(QLabel(self.tr_("profile")))
+        self.profile_lbl = QLabel(self.tr_("profile"))
+        prow.addWidget(self.profile_lbl)
         self.profile_combo = QComboBox()
         self.profile_combo.addItems(sorted(self.cfg.profiles))
         self.profile_combo.setCurrentText(self.cfg.current_profile)
         self.profile_combo.currentTextChanged.connect(self._switch_profile)
         prow.addWidget(self.profile_combo, 1)
-        new_btn = QPushButton(self.tr_("new_profile"))
-        new_btn.clicked.connect(self._new_profile)
-        prow.addWidget(new_btn)
-        del_btn = QPushButton(self.tr_("delete_profile"))
-        del_btn.clicked.connect(self._delete_profile)
-        prow.addWidget(del_btn)
+        self.new_profile_btn = QPushButton(self.tr_("new_profile"))
+        self.new_profile_btn.clicked.connect(self._new_profile)
+        prow.addWidget(self.new_profile_btn)
+        self.del_profile_btn = QPushButton(self.tr_("delete_profile"))
+        self.del_profile_btn.clicked.connect(self._delete_profile)
+        prow.addWidget(self.del_profile_btn)
         card.body.addLayout(prow)
 
-        form = QFormLayout()
-        form.setSpacing(10)
+        self.conn_form = QFormLayout()
+        self.conn_form.setSpacing(10)
         self.edits: dict[str, QLineEdit] = {}
         for key in CONN_FIELDS:
             edit = QLineEdit()
             if key == "API_HASH":
                 edit.setEchoMode(QLineEdit.EchoMode.PasswordEchoOnEdit)
             self.edits[key] = edit
-            form.addRow(self.tr_(f"field_{key}"), edit)
-        card.body.addLayout(form)
+            self.conn_form.addRow(self.tr_(f"field_{key}"), edit)
+        card.body.addLayout(self.conn_form)
 
         brow = QHBoxLayout()
-        save_btn = QPushButton(self.tr_("save"))
-        save_btn.setObjectName("primary")
-        save_btn.clicked.connect(self._save)
-        brow.addWidget(save_btn)
-        qr_btn = QPushButton(self.tr_("qr_login_button"))
-        qr_btn.clicked.connect(self._qr_login)
-        brow.addWidget(qr_btn)
+        self.save_btn = QPushButton(self.tr_("save"))
+        self.save_btn.setObjectName("primary")
+        self.save_btn.clicked.connect(self._save)
+        brow.addWidget(self.save_btn)
+        self.qr_btn = QPushButton(self.tr_("qr_login_button"))
+        self.qr_btn.clicked.connect(self._qr_login)
+        brow.addWidget(self.qr_btn)
         self.check_login_btn = QPushButton(self.tr_("check_login_button"))
         self.check_login_btn.clicked.connect(self._check_login)
         brow.addWidget(self.check_login_btn)
@@ -117,36 +118,37 @@ class ConfigView(QWidget):
         self.status.setWordWrap(True)
         card.body.addWidget(self.status)
 
-        loc = QLabel(self.tr_("config_location", path=str(self.cfg.path)))
-        loc.setObjectName("hint")
-        loc.setWordWrap(True)
-        card.body.addWidget(loc)
+        self.loc_lbl = QLabel(self.tr_("config_location", path=str(self.cfg.path)))
+        self.loc_lbl.setObjectName("hint")
+        self.loc_lbl.setWordWrap(True)
+        card.body.addWidget(self.loc_lbl)
         return card
 
     def _fetch_card(self) -> Card:
         card = SectionCard(self.tr_("fetch_title"))
+        self.fetch_card_ref = card
 
-        help_lbl = QLabel(self.tr_("fetch_help"))
-        help_lbl.setObjectName("hint")
-        help_lbl.setWordWrap(True)
-        card.body.addWidget(help_lbl)
+        self.fetch_help_lbl = QLabel(self.tr_("fetch_help"))
+        self.fetch_help_lbl.setObjectName("hint")
+        self.fetch_help_lbl.setWordWrap(True)
+        card.body.addWidget(self.fetch_help_lbl)
 
-        form = QFormLayout()
-        form.setSpacing(10)
+        self.fetch_form = QFormLayout()
+        self.fetch_form.setSpacing(10)
         self.channel_edit = QLineEdit(self.cfg.get("CHANNEL_ID"))
         self.channel_edit.setPlaceholderText(self.tr_("fetch_channel_placeholder"))
-        form.addRow(self.tr_("fetch_channel"), self.channel_edit)
+        self.fetch_form.addRow(self.tr_("fetch_channel"), self.channel_edit)
 
         self.top_spin = QSpinBox()
         self.top_spin.setRange(1, 1000)
         self.top_spin.setValue(20)
-        form.addRow(self.tr_("fetch_top_n"), self.top_spin)
+        self.fetch_form.addRow(self.tr_("fetch_top_n"), self.top_spin)
 
         self.period_combo = QComboBox()
         self.period_combo.addItems([self.tr_(f"period_{k}") for k in PERIOD_KEYS])
         self.period_combo.setCurrentIndex(3)  # 2 years
-        form.addRow(self.tr_("fetch_period"), self.period_combo)
-        card.body.addLayout(form)
+        self.fetch_form.addRow(self.tr_("fetch_period"), self.period_combo)
+        card.body.addLayout(self.fetch_form)
 
         self.public_check = QCheckBox(self.tr_("fetch_public"))
         card.body.addWidget(self.public_check)
@@ -177,17 +179,55 @@ class ConfigView(QWidget):
 
     def _instructions_card(self) -> QGroupBox:
         box = QGroupBox(self.tr_("instructions_title"))
+        self.instructions_box = box
         box.setCheckable(True)
         box.setChecked(False)
         lay = QVBoxLayout(box)
-        info = QLabel(self.tr_("instructions_text"))
-        info.setWordWrap(True)
-        info.setOpenExternalLinks(True)
-        info.setTextFormat(Qt.TextFormat.RichText)
-        info.setVisible(False)
-        lay.addWidget(info)
-        box.toggled.connect(info.setVisible)
+        self.instructions_info = QLabel(self.tr_("instructions_text"))
+        self.instructions_info.setWordWrap(True)
+        self.instructions_info.setOpenExternalLinks(True)
+        self.instructions_info.setTextFormat(Qt.TextFormat.RichText)
+        self.instructions_info.setVisible(False)
+        lay.addWidget(self.instructions_info)
+        box.toggled.connect(self.instructions_info.setVisible)
         return box
+
+    # ---------------------------------------------------------- translate
+    def retranslate(self) -> None:
+        self.title_lbl.setText(self.tr_("nav_config"))
+        self.sub_lbl.setText(self.tr_("app_title"))
+        self.profile_lbl.setText(self.tr_("profile"))
+        self.new_profile_btn.setText(self.tr_("new_profile"))
+        self.del_profile_btn.setText(self.tr_("delete_profile"))
+        for key, edit in self.edits.items():
+            lbl = self.conn_form.labelForField(edit)
+            if lbl:
+                lbl.setText(self.tr_(f"field_{key}"))
+        self.save_btn.setText(self.tr_("save"))
+        self.qr_btn.setText(self.tr_("qr_login_button"))
+        self.check_login_btn.setText(self.tr_("check_login_button"))
+        self.loc_lbl.setText(self.tr_("config_location", path=str(self.cfg.path)))
+
+        self.fetch_card_ref.title_lbl.setText(self.tr_("fetch_title"))
+        self.fetch_help_lbl.setText(self.tr_("fetch_help"))
+        lbl = self.fetch_form.labelForField(self.channel_edit)
+        if lbl:
+            lbl.setText(self.tr_("fetch_channel"))
+        self.channel_edit.setPlaceholderText(self.tr_("fetch_channel_placeholder"))
+        lbl = self.fetch_form.labelForField(self.top_spin)
+        if lbl:
+            lbl.setText(self.tr_("fetch_top_n"))
+        lbl = self.fetch_form.labelForField(self.period_combo)
+        if lbl:
+            lbl.setText(self.tr_("fetch_period"))
+        for i, k in enumerate(PERIOD_KEYS):
+            self.period_combo.setItemText(i, self.tr_(f"period_{k}"))
+        self.public_check.setText(self.tr_("fetch_public"))
+        self.fetch_btn.setText(self.tr_("fetch_button"))
+        self.stop_btn.setText(self.tr_("stop"))
+
+        self.instructions_box.setTitle(self.tr_("instructions_title"))
+        self.instructions_info.setText(self.tr_("instructions_text"))
 
     # ------------------------------------------------------ field helpers
     def _load_fields(self) -> None:

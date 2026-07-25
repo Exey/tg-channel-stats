@@ -217,15 +217,20 @@ class MainWindow(QMainWindow):
         if code == self.i18n.lang:
             self._build_menu()
             return
-        if self.config_view.is_running():
-            QMessageBox.warning(self, self.i18n.tr("app_title"),
-                                self.i18n.tr("worker_running"))
-            self._build_menu()
-            return
         self.i18n.lang = code
         self.cfg.language = code
         self.cfg.save()
-        self._build_ui()  # rebuild everything with the new language
+        # Retranslate every screen in place — unlike _switch_theme, this
+        # never rebuilds widgets, so a running fetch, unsaved config fields,
+        # sidebar fold/compare state and the currently-open screen all
+        # survive a language switch untouched.
+        self.setWindowTitle(self.i18n.tr("app_title"))
+        self._build_menu()
+        self.side.retranslate()
+        self.dashboard.retranslate()
+        self.config_view.retranslate()
+        self.compare.retranslate()
+        self.unfold_btn.setToolTip(self.i18n.tr("nav_unfold_hint"))
 
     # --------------------------------------------------------------- theme
     def _switch_theme(self, pref: str) -> None:
