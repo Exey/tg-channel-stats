@@ -5,14 +5,16 @@ EN = {
     "app_title": "TG Channel Stats",
     # nav / sidebar
     "nav_config": "Config",
-    "nav_channels": "Channels",
     "nav_no_channels": "No channels yet — fetch one from the Config screen.",
     "nav_compare": "⇄ Compare",
-    "nav_compare_hint": "Pick 2-6 channels to compare.",
+    "nav_compare_hint": "Pick 2-8 channels to compare.",
     "nav_fold_hint": "Collapse sidebar",
     "nav_unfold_hint": "Expand sidebar",
     "nav_lang_hint": "Switch language",
+    "nav_compare_md": "MD",
+    "nav_compare_md_hint": "Export the current comparison as a Markdown table",
     "compare_title": "Compare channels",
+    "compare_md_metric": "Metric",
     # menus
     "menu_file": "File",
     "menu_language": "Language",
@@ -118,7 +120,6 @@ EN = {
     "stat_max_reposts": "Max reposts",
     "stat_created": "Created",
     # compare-mode calculated cards
-    "stat_views_per_member": "Avg. views / member",
     "stat_reposts_per_post": "Avg. repost / post",
     "stat_err_pct": "ERR%",
     "stat_err_pct_sub": "2 weeks+",
@@ -127,6 +128,9 @@ EN = {
     "cmp_max_reposts": "Max repost / post",
     "cmp_avg_reactions": "Avg. reactions / post",
     "cmp_view_repost_year": "Views {year}",
+    "cmp_erv_pct": "ERV%",
+    "cmp_erv_pct_tip": "(Avg. reactions + avg. reposts) ÷ avg. views × 100% "
+                       "— engagement rate by views.",
     "cmp_virality_index": "Virality index",
     "cmp_virality_index_tip": "Max views ÷ avg. views — the spread between the "
                               "best-performing post and the average. A high "
@@ -177,14 +181,16 @@ EN = {
 RU = {
     "app_title": "TG Channel Stats",
     "nav_config": "Настройки",
-    "nav_channels": "Каналы",
     "nav_no_channels": "Пока нет каналов — загрузите канал на экране «Настройки».",
     "nav_compare": "⇄ Сравнить",
-    "nav_compare_hint": "Выберите 2-6 каналов для сравнения.",
+    "nav_compare_hint": "Выберите 2-8 каналов для сравнения.",
     "nav_fold_hint": "Свернуть панель",
     "nav_unfold_hint": "Развернуть панель",
     "nav_lang_hint": "Переключить язык",
+    "nav_compare_md": "MD",
+    "nav_compare_md_hint": "Экспортировать текущее сравнение в таблицу Markdown",
     "compare_title": "Сравнение каналов",
+    "compare_md_metric": "Метрика",
     "menu_file": "Файл",
     "menu_language": "Язык",
     "menu_theme": "Тема",
@@ -282,7 +288,6 @@ RU = {
     "stat_avg_reposts": "Ср. репосты",
     "stat_max_reposts": "Макс. репосты",
     "stat_created": "Создан",
-    "stat_views_per_member": "Ср. просмотры / подписчика",
     "stat_reposts_per_post": "Ср. репост / пост",
     "stat_err_pct": "ERR%",
     "stat_err_pct_sub": "2 нед.+",
@@ -291,6 +296,9 @@ RU = {
     "cmp_max_reposts": "Макс. репост / пост",
     "cmp_avg_reactions": "Ср. реакции / пост",
     "cmp_view_repost_year": "Просмотры {year}",
+    "cmp_erv_pct": "ERV% (действия/просмотры)",
+    "cmp_erv_pct_tip": "(Ср. реакции + ср. репосты) ÷ ср. просмотры × 100% "
+                       "— вовлечённость по просмотрам.",
     "cmp_virality_index": "Индекс виральности",
     "cmp_virality_index_tip": "Макс. просмотры ÷ ср. просмотры — разброс между "
                               "лучшим постом и средним. Высокое значение "

@@ -22,8 +22,9 @@ from .widgets import NavButton, hline
 class SidePanel(QFrame):
     config_selected = Signal()
     channel_selected = Signal(str)   # checkpoint key
-    compare_requested = Signal(list)  # 2-6 checkpoint keys
+    compare_requested = Signal(list)  # 2-8 checkpoint keys
     compare_mode_off = Signal()
+    compare_md_requested = Signal()
     fold_requested = Signal()
     language_toggle_requested = Signal()
 
@@ -73,16 +74,17 @@ class SidePanel(QFrame):
 
         root.addSpacing(8)
         section_row = QHBoxLayout()
-        self.section_lbl = QLabel(i18n.tr("nav_channels"))
-        self.section_lbl.setObjectName("sectionLabel")
-        section_row.addWidget(self.section_lbl)
-        section_row.addStretch()
         self.compare_btn = QPushButton(i18n.tr("nav_compare"))
         self.compare_btn.setObjectName("ghost")
         self.compare_btn.setCheckable(True)
         self.compare_btn.setToolTip(i18n.tr("nav_compare_hint"))
         self.compare_btn.toggled.connect(self._toggle_compare_mode)
-        section_row.addWidget(self.compare_btn)
+        section_row.addWidget(self.compare_btn, 1)
+        self.compare_md_btn = QPushButton(i18n.tr("nav_compare_md"))
+        self.compare_md_btn.setObjectName("ghost")
+        self.compare_md_btn.setToolTip(i18n.tr("nav_compare_md_hint"))
+        self.compare_md_btn.clicked.connect(lambda: self.compare_md_requested.emit())
+        section_row.addWidget(self.compare_md_btn, 1)
         root.addLayout(section_row)
         root.addWidget(hline())
 
@@ -175,10 +177,11 @@ class SidePanel(QFrame):
 
     def retranslate(self) -> None:
         self.config_btn.set_text(self.i18n.tr("nav_config"))
-        self.section_lbl.setText(self.i18n.tr("nav_channels"))
         self.empty_lbl.setText(self.i18n.tr("nav_no_channels"))
         self.compare_btn.setText(self.i18n.tr("nav_compare"))
         self.compare_btn.setToolTip(self.i18n.tr("nav_compare_hint"))
+        self.compare_md_btn.setText(self.i18n.tr("nav_compare_md"))
+        self.compare_md_btn.setToolTip(self.i18n.tr("nav_compare_md_hint"))
         self.fold_btn.setToolTip(self.i18n.tr("nav_fold_hint"))
         self.lang_btn.setText(self.i18n.lang.upper())
         self.lang_btn.setToolTip(self.i18n.tr("nav_lang_hint"))

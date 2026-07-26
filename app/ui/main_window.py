@@ -55,6 +55,7 @@ class MainWindow(QMainWindow):
         self.side.compare_mode_off.connect(self._on_compare_mode_off)
         self.side.fold_requested.connect(self._fold_sidebar)
         self.side.language_toggle_requested.connect(self._toggle_language)
+        self.side.compare_md_requested.connect(lambda: self.compare.save_markdown())
         lay.addWidget(self.side)
 
         content_col = QVBoxLayout()
@@ -62,10 +63,11 @@ class MainWindow(QMainWindow):
         content_col.setSpacing(0)
 
         top_strip = QHBoxLayout()
-        top_strip.setContentsMargins(16, 10, 12, 0)
+        top_strip.setContentsMargins(16, 4, 12, 0)
         self.unfold_btn = QPushButton("▶")
         self.unfold_btn.setObjectName("ghost")
         self.unfold_btn.setMinimumWidth(28)
+        self.unfold_btn.setStyleSheet("padding: 4px 12px;")
         self.unfold_btn.setToolTip(self.i18n.tr("nav_unfold_hint"))
         self.unfold_btn.clicked.connect(self._unfold_sidebar)
         self.unfold_btn.setVisible(False)

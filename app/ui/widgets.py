@@ -54,6 +54,10 @@ class StatCard(Card):
         lay.addStretch()
         self.setMinimumHeight(132)
 
+        self._compact = False
+        self._winner = False
+        self._lowest = False
+
     def set_value(self, value: str, sub: str = "", spark=None) -> None:
         self.value_lbl.setText(value)
         self.sub_lbl.setText(sub)
@@ -65,21 +69,46 @@ class StatCard(Card):
     def set_compact(self, on: bool = True) -> None:
         """Tighter padding + smaller type — used by compare mode, where each
         card is much shorter than the dashboard's full-size tiles."""
+        self._compact = on
         if on:
             self.layout().setContentsMargins(14, 6, 14, 6)
             self.layout().setSpacing(2)
-            self.title_lbl.setStyleSheet("font-size: 11px;")
-            self.value_lbl.setStyleSheet("font-size: 18px;")
         else:
             self.layout().setContentsMargins(18, 16, 18, 16)
             self.layout().setSpacing(6)
-            self.title_lbl.setStyleSheet("")
-            self.value_lbl.setStyleSheet("")
+        self._apply_label_style()
+
+    def _apply_label_style(self) -> None:
+        # title_lbl/value_lbl each need at most one local stylesheet, so
+        # compact sizing and the lowest-value text color are combined here
+        # rather than in set_compact()/set_lowest() directly (setStyleSheet
+        # replaces the whole local sheet, it doesn't merge across calls).
+        title = "font-size: 11px;" if self._compact else ""
+        value = "font-size: 18px;" if self._compact else ""
+        if self._lowest:
+            title += " color: #D9B8DE;"
+            value += " color: #FFFFFF;"
+        self.title_lbl.setStyleSheet(title)
+        self.value_lbl.setStyleSheet(value)
 
     def set_highlighted(self, on: bool) -> None:
         """Gold border — used by compare mode to mark the winning metric."""
-        self.setStyleSheet(
-            f"QFrame#card {{ border: 2px solid {COLORS['win']}; }}" if on else "")
+        self._winner = on
+        self._apply_card_style()
+
+    def set_lowest(self, on: bool) -> None:
+        """Dark fill — used by compare mode to mark the worst metric."""
+        self._lowest = on
+        self._apply_label_style()
+        self._apply_card_style()
+
+    def _apply_card_style(self) -> None:
+        rules = []
+        if self._lowest:
+            rules.append("background: #241D34;")
+        if self._winner:
+            rules.append(f"border: 2px solid {COLORS['win']};")
+        self.setStyleSheet(f"QFrame#card {{ {' '.join(rules)} }}" if rules else "")
 
 
 class ChartCard(Card):

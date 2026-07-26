@@ -439,6 +439,7 @@ class ConfigView(QWidget):
                                       title=payload.get("title", ""),
                                       n=len(payload.get("rows", [])),
                                       scanned=payload.get("scanned", 0)))
+            self.channel_edit.clear()
             self.channel_fetched.emit(payload)
         else:
             self._append_log(self.tr_("done_fail", msg=msg))
