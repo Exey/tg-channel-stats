@@ -15,7 +15,8 @@ EN = {
     "nav_compare_md_hint": "Export the current comparison as a Markdown table",
     "compare_title": "Compare channels",
     "compare_md_metric": "Metric",
-    # folders (right-click a channel in the sidebar)
+    # folders (right-click a channel in the sidebar, or the dashboard's folder
+    # button / Config screen's Folders card)
     "folder_none": "No folder",
     "folder_manage": "Manage folders…",
     "folder_manage_title": "Manage folders",
@@ -26,6 +27,41 @@ EN = {
     "folder_delete": "Delete folder",
     "folder_delete_confirm": "Delete folder “{name}”? Channels in it keep their "
                              "data — only the folder assignment is removed.",
+    "folder_section_title": "Folders",
+    "folder_manage_help": "Create, rename, recolor or delete the folders used "
+                          "to organize channels in the sidebar.",
+    "folder_list_empty": "No folders yet.",
+    "folder_choose": "Assign this channel to a folder",
+    # folder stat view
+    "nav_folder_stat": "Folder Stats",
+    "folder_stat_sub": "Cross-channel links and periodic stats for one folder",
+    "folder_stat_pick_folder": "Folder:",
+    "folder_stat_no_folders": "No folders yet — create one from the Config screen.",
+    "folder_stat_empty_channels": "This folder has no channels yet.",
+    "folder_stat_links_title": "Channel links",
+    "folder_stat_links_hint": "Reposts between this folder's channels, detected "
+                              "from each channel's top posts. Needs \"Include "
+                              "public reposts\" enabled when a channel was fetched.",
+    "folder_stat_links_empty": "No cross-channel reposts found.",
+    "col_link_source": "Source",
+    "col_link_target": "Target",
+    "col_link_reposts": "Reposts",
+    "col_link_example": "Example",
+    "folder_stat_period_title": "Periodic stats",
+    "folder_stat_period_hint": "Per-period totals from each channel's stored "
+                               "top posts. Name and Website are left blank — "
+                               "fill them in later.",
+    "period_mode_month": "Monthly",
+    "period_mode_season": "Seasonal",
+    "col_channel_title": "Title",
+    "col_username_id": "Username/ID",
+    "col_shares": "Shares",
+    "col_most_viewed": "Most viewed post",
+    "col_viral_share": "Viral share",
+    "col_rating": "Rating",
+    "col_name": "Name",
+    "col_website": "Website",
+    "folder_stat_period_empty": "No posts found for this folder.",
     # menus
     "menu_file": "File",
     "menu_language": "Language",
@@ -161,12 +197,14 @@ EN = {
     "wd_fri": "Fri", "wd_sat": "Sat", "wd_sun": "Sun",
     # top posts table (from channel_top)
     "top_posts_title": "Top posts",
+    "top_viral_title": "Top viral posts",
     "col_date": "Date",
     "col_post": "Post",
     "col_views": "Views",
     "col_reactions": "Reactions",
     "col_private": "Private reposts",
     "col_public": "Public reposts",
+    "col_viral_rate": "Viral rate",
     "album_suffix": "  ·  album ({n} items)",
     "show": "Show",
     "public_na": "n/a",
@@ -212,6 +250,41 @@ RU = {
     "folder_delete": "Удалить папку",
     "folder_delete_confirm": "Удалить папку «{name}»? Каналы в ней сохранятся — "
                              "будет удалена только привязка к папке.",
+    "folder_section_title": "Папки",
+    "folder_manage_help": "Создавайте, переименовывайте, перекрашивайте или "
+                          "удаляйте папки для организации каналов в боковой панели.",
+    "folder_list_empty": "Пока нет папок.",
+    "folder_choose": "Добавить канал в папку",
+    # folder stat view
+    "nav_folder_stat": "Статистика папки",
+    "folder_stat_sub": "Связи между каналами и статистика по периодам для одной папки",
+    "folder_stat_pick_folder": "Папка:",
+    "folder_stat_no_folders": "Пока нет папок — создайте на экране настроек.",
+    "folder_stat_empty_channels": "В этой папке пока нет каналов.",
+    "folder_stat_links_title": "Связи каналов",
+    "folder_stat_links_hint": "Репосты между каналами этой папки, определённые "
+                              "по топ-постам каждого канала. Требует включённой "
+                              "опции «Публичные репосты» при сборе канала.",
+    "folder_stat_links_empty": "Репостов между каналами не найдено.",
+    "col_link_source": "Источник",
+    "col_link_target": "Куда",
+    "col_link_reposts": "Репосты",
+    "col_link_example": "Пример",
+    "folder_stat_period_title": "Статистика по периодам",
+    "folder_stat_period_hint": "Суммы по периодам из сохранённых топ-постов "
+                               "каждого канала. Колонки «Имя» и «Сайт» оставлены "
+                               "пустыми — заполните их позже.",
+    "period_mode_month": "По месяцам",
+    "period_mode_season": "По сезонам",
+    "col_channel_title": "Название",
+    "col_username_id": "Username/ID",
+    "col_shares": "Репосты",
+    "col_most_viewed": "Самый популярный пост",
+    "col_viral_share": "Доля виральных",
+    "col_rating": "Рейтинг",
+    "col_name": "Имя",
+    "col_website": "Сайт",
+    "folder_stat_period_empty": "Постов в этой папке не найдено.",
     "menu_file": "Файл",
     "menu_language": "Язык",
     "menu_theme": "Тема",
@@ -336,11 +409,13 @@ RU = {
     "wd_mon": "Пн", "wd_tue": "Вт", "wd_wed": "Ср", "wd_thu": "Чт",
     "wd_fri": "Пт", "wd_sat": "Сб", "wd_sun": "Вс",
     "top_posts_title": "Топ постов",
+    "top_viral_title": "Топ виральных постов",
     "col_date": "Дата",
     "col_post": "Пост",
     "col_views": "Просмотры",
     "col_reactions": "Реакции",
     "col_private": "Личные репосты",
+    "col_viral_rate": "Виральность",
     "col_public": "Публичные репосты",
     "album_suffix": "  ·  альбом ({n} элементов)",
     "show": "Показать",

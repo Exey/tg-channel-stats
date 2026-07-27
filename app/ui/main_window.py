@@ -10,11 +10,13 @@ from PySide6.QtWidgets import (
 )
 
 from ..config import Config, config_dir
+from ..folders import FolderStore
 from ..i18n import I18n
 from ..store import ChannelStore
 from .compare_view import CompareView
 from .config_view import ConfigView
 from .dashboard_view import DashboardView
+from .folder_stat_view import FolderStatView
 from .side_panel import SidePanel
 from .theme import apply_theme
 
@@ -25,6 +27,7 @@ class MainWindow(QMainWindow):
         self.cfg = Config()
         self.i18n = I18n(self.cfg.language)
         self.store = ChannelStore()
+        self.folder_store = FolderStore()
         self.resize(1240, 860)
         self.setMinimumSize(1040, 720)
         self._current_key: str | None = None   # None => Config screen
@@ -48,14 +51,16 @@ class MainWindow(QMainWindow):
         lay.setContentsMargins(0, 0, 0, 0)
         lay.setSpacing(0)
 
-        self.side = SidePanel(self.i18n)
+        self.side = SidePanel(self.i18n, self.folder_store)
         self.side.config_selected.connect(self._show_config)
+        self.side.folder_stat_selected.connect(self._show_folder_stat)
         self.side.channel_selected.connect(self._show_channel)
         self.side.compare_requested.connect(self._show_compare)
         self.side.compare_mode_off.connect(self._on_compare_mode_off)
         self.side.fold_requested.connect(self._fold_sidebar)
         self.side.language_toggle_requested.connect(self._toggle_language)
         self.side.compare_md_requested.connect(lambda: self.compare.save_markdown())
+        self.side.folders_changed.connect(self._on_folders_changed)
         lay.addWidget(self.side)
 
         content_col = QVBoxLayout()
@@ -76,15 +81,19 @@ class MainWindow(QMainWindow):
         content_col.addLayout(top_strip)
 
         self.stack = QStackedWidget()
-        self.config_view = ConfigView(self.cfg, self.i18n)
+        self.config_view = ConfigView(self.cfg, self.i18n, self.folder_store)
         self.config_view.channel_fetched.connect(self._on_channel_fetched)
-        self.dashboard = DashboardView(self.i18n)
+        self.config_view.folders_changed.connect(self._on_folders_changed)
+        self.dashboard = DashboardView(self.i18n, self.folder_store)
         self.dashboard.refetch_requested.connect(self._on_refetch)
         self.dashboard.remove_requested.connect(self._on_remove)
+        self.dashboard.folders_changed.connect(self._on_folders_changed)
         self.compare = CompareView(self.i18n)
+        self.folder_stat = FolderStatView(self.i18n, self.folder_store, self.store)
         self.stack.addWidget(self.config_view)   # index 0
         self.stack.addWidget(self.dashboard)     # index 1
         self.stack.addWidget(self.compare)       # index 2
+        self.stack.addWidget(self.folder_stat)   # index 3
         content_col.addWidget(self.stack, 1)
 
         content_wrap = QWidget()
@@ -147,6 +156,17 @@ class MainWindow(QMainWindow):
     # ------------------------------------------------------------- sidebar
     def _refresh_sidebar(self) -> None:
         self.side.set_channels(self.store.list())
+        self.folder_stat.refresh()
+
+    def _on_folders_changed(self) -> None:
+        # Folder list/assignments changed from either the Config screen, the
+        # dashboard's folder button, or the sidebar's context menu — keep all
+        # three views in sync regardless of which one triggered the change.
+        self.side.refresh_folder_dots()
+        self.config_view.refresh_folders_list()
+        self.folder_stat.refresh()
+        if self._current_key:
+            self.dashboard.refresh_folder_button()
 
     def _fold_sidebar(self) -> None:
         self._sidebar_folded = True
@@ -163,6 +183,12 @@ class MainWindow(QMainWindow):
         self._current_key = None
         self.side.select_config()
         self.stack.setCurrentWidget(self.config_view)
+
+    def _show_folder_stat(self) -> None:
+        self._current_key = None
+        self.side.select_folder_stat()
+        self.folder_stat.refresh()
+        self.stack.setCurrentWidget(self.folder_stat)
 
     def _show_channel(self, key: str) -> None:
         data = self.store.load(key)
@@ -232,6 +258,7 @@ class MainWindow(QMainWindow):
         self.dashboard.retranslate()
         self.config_view.retranslate()
         self.compare.retranslate()
+        self.folder_stat.retranslate()
         self.unfold_btn.setToolTip(self.i18n.tr("nav_unfold_hint"))
 
     # --------------------------------------------------------------- theme

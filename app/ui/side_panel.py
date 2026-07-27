@@ -8,7 +8,6 @@ analytics_dashboard nav).
 from __future__ import annotations
 
 from PySide6.QtCore import Qt, Signal
-from PySide6.QtGui import QColor, QIcon, QPainter, QPixmap
 from PySide6.QtWidgets import (
     QButtonGroup, QFrame, QHBoxLayout, QLabel, QMenu, QPushButton,
     QScrollArea, QVBoxLayout, QWidget,
@@ -19,38 +18,28 @@ from .compare_view import MAX_COMPARE
 from .dashboard_view import short_num
 from .folder_dialog import FolderManagerDialog
 from .theme import COLORS
-from .widgets import NavButton, hline
-
-
-def _folder_icon(color: str) -> QIcon:
-    pixmap = QPixmap(14, 14)
-    pixmap.fill(Qt.GlobalColor.transparent)
-    painter = QPainter(pixmap)
-    painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-    painter.setBrush(QColor(color))
-    painter.setPen(Qt.PenStyle.NoPen)
-    painter.drawEllipse(1, 1, 12, 12)
-    painter.end()
-    return QIcon(pixmap)
+from .widgets import NavButton, folder_icon, hline
 
 
 class SidePanel(QFrame):
     config_selected = Signal()
+    folder_stat_selected = Signal()
     channel_selected = Signal(str)   # checkpoint key
     compare_requested = Signal(list)  # 2-8 checkpoint keys
     compare_mode_off = Signal()
     compare_md_requested = Signal()
     fold_requested = Signal()
     language_toggle_requested = Signal()
+    folders_changed = Signal()
 
-    def __init__(self, i18n, parent=None) -> None:
+    def __init__(self, i18n, folder_store: FolderStore, parent=None) -> None:
         super().__init__(parent)
         self.i18n = i18n
         self.setObjectName("sidebar")
         self.setFixedWidth(256)
         self.compare_mode = False
         self._compare_keys: list[str] = []
-        self.folder_store = FolderStore()
+        self.folder_store = folder_store
 
         root = QVBoxLayout(self)
         root.setContentsMargins(16, 22, 16, 18)
@@ -87,6 +76,11 @@ class SidePanel(QFrame):
         self.lang_btn.clicked.connect(lambda: self.language_toggle_requested.emit())
         config_row.addWidget(self.lang_btn)
         root.addLayout(config_row)
+
+        self.folder_stat_btn = NavButton("graph", i18n.tr("nav_folder_stat"))
+        self.folder_stat_btn.clicked.connect(lambda: self.folder_stat_selected.emit())
+        self.group.addButton(self.folder_stat_btn)
+        root.addWidget(self.folder_stat_btn)
 
         root.addSpacing(8)
         section_row = QHBoxLayout()
@@ -144,7 +138,9 @@ class SidePanel(QFrame):
 
         self._compare_keys.clear()
         for ch in channels:
-            btn = NavButton("reports", ch.get("title") or ch.get("key", "?"))
+            username = ch.get("username") or ""
+            label = f"@{username}" if username else (ch.get("title") or ch.get("key", "?"))
+            btn = NavButton("reports", label)
             btn.setToolTip(ch.get("channel") or ch.get("title", ""))
             members = ch.get("members", 0) or 0
             btn.set_meta(short_num(members, 1) if members else "")
@@ -158,14 +154,15 @@ class SidePanel(QFrame):
             self.list_lay.insertWidget(self.list_lay.count() - 1, btn)
             self._channel_btns[key] = btn
         self.group.setExclusive(not self.compare_mode)
-        self._refresh_folder_dots()
+        self.refresh_folder_dots()
 
     # -------------------------------------------------------------- folders
-    def _refresh_folder_dots(self) -> None:
+    def refresh_folder_dots(self) -> None:
         for key, btn in self._channel_btns.items():
             folder_id = self.folder_store.folder_for_channel(key)
             folder = self.folder_store.get_folder(folder_id) if folder_id else None
-            btn.set_folder_color(folder["color"] if folder else None)
+            btn.set_folder_color(folder["color"] if folder else None,
+                                 folder["name"] if folder else None)
 
     def _show_channel_menu(self, key: str, btn: NavButton, pos) -> None:
         menu = QMenu(self)
@@ -180,7 +177,7 @@ class SidePanel(QFrame):
         if folders:
             menu.addSeparator()
             for folder in folders:
-                act = menu.addAction(_folder_icon(folder["color"]), folder["name"])
+                act = menu.addAction(folder_icon(folder["color"]), folder["name"])
                 act.setCheckable(True)
                 act.setChecked(folder["id"] == current)
                 act.triggered.connect(
@@ -194,12 +191,14 @@ class SidePanel(QFrame):
 
     def _assign_folder(self, key: str, folder_id: str | None) -> None:
         self.folder_store.set_channel_folder(key, folder_id)
-        self._refresh_folder_dots()
+        self.refresh_folder_dots()
+        self.folders_changed.emit()
 
     def _open_folder_manager(self) -> None:
         dlg = FolderManagerDialog(self.folder_store, self.i18n, self)
         dlg.exec()
-        self._refresh_folder_dots()
+        self.refresh_folder_dots()
+        self.folders_changed.emit()
 
     # ------------------------------------------------------------- compare
     def _toggle_compare_mode(self, on: bool) -> None:
@@ -232,6 +231,9 @@ class SidePanel(QFrame):
     def select_config(self) -> None:
         self.config_btn.setChecked(True)
 
+    def select_folder_stat(self) -> None:
+        self.folder_stat_btn.setChecked(True)
+
     def select_channel(self, key: str) -> None:
         btn = self._channel_btns.get(key)
         if btn:
@@ -245,6 +247,7 @@ class SidePanel(QFrame):
 
     def retranslate(self) -> None:
         self.config_btn.set_text(self.i18n.tr("nav_config"))
+        self.folder_stat_btn.set_text(self.i18n.tr("nav_folder_stat"))
         self.empty_lbl.setText(self.i18n.tr("nav_no_channels"))
         self.compare_btn.setText(self.i18n.tr("nav_compare"))
         self.compare_btn.setToolTip(self.i18n.tr("nav_compare_hint"))

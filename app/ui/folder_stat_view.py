@@ -1,0 +1,660 @@
+"""Folder Stat view: for one folder of channels, show reposts between them
+and per-period (monthly/seasonal) totals exportable as Markdown.
+
+Both tables are built from what's already in each channel's checkpoint (the
+stored top-N posts), not a fresh Telegram fetch — so this is only as complete
+as the top-N and "include public reposts" choices made when each channel in
+the folder was fetched.
+
+The month/season picker buttons are deliberately built from *every* tracked
+channel, not just the ones in the currently selected folder — so the grid of
+available periods stays put as you switch folders; only the numbers below it
+change.
+"""
+from __future__ import annotations
+
+import re
+from datetime import datetime
+
+from PySide6.QtCore import Qt, QUrl
+from PySide6.QtGui import QDesktopServices
+from PySide6.QtWidgets import (
+    QAbstractItemView, QButtonGroup, QComboBox, QFileDialog, QHBoxLayout,
+    QHeaderView, QLabel, QMessageBox, QPushButton, QScrollArea, QSizePolicy,
+    QTableWidget, QTableWidgetItem, QVBoxLayout, QWidget,
+)
+
+from ..folders import FolderStore
+from ..store import ChannelStore
+from .dashboard_view import build_post_link, fmt_int
+from .widgets import SectionCard, hline
+
+_SEASON_BY_MONTH = {
+    12: "Winter", 1: "Winter", 2: "Winter",
+    3: "Spring", 4: "Spring", 5: "Spring",
+    6: "Summer", 7: "Summer", 8: "Summer",
+    9: "Fall", 10: "Fall", 11: "Fall",
+}
+_SEASON_ORDER = {"Winter": 0, "Spring": 1, "Summer": 2, "Fall": 3}
+MONTHS_FULL = ["", "January", "February", "March", "April", "May", "June",
+               "July", "August", "September", "October", "November", "December"]
+
+
+def _parse_date(iso: str) -> datetime | None:
+    if not iso:
+        return None
+    try:
+        return datetime.fromisoformat(iso.replace("Z", "+00:00")).astimezone()
+    except ValueError:
+        return None
+
+
+def _period_key_label(dt: datetime, mode: str) -> tuple[tuple, str]:
+    if mode == "season":
+        season = _SEASON_BY_MONTH[dt.month]
+        year = dt.year + 1 if dt.month == 12 else dt.year
+        if season == "Winter":
+            label = f"Winter {year - 1}/{str(year)[2:]}"
+        else:
+            label = f"{season} {year}"
+        return (year, _SEASON_ORDER[season]), label
+    return (dt.year, dt.month), f"{dt.year:04d}-{dt.month:02d}"
+
+
+def _extract_ident(link: str) -> str:
+    m = re.search(r"t\.me/(?:c/)?([^/?#\s]+)", str(link or ""))
+    return m.group(1).lower() if m else ""
+
+
+def _channel_uid(ch: dict) -> str:
+    username = ch.get("username") or ""
+    return f"@{username}" if username else (ch.get("channel") or ch.get("key", ""))
+
+
+def _channel_title(ch: dict) -> str:
+    return ch.get("title") or ch.get("channel") or ch.get("key", "")
+
+
+def _channel_label(ch: dict) -> str:
+    username = ch.get("username") or ""
+    if username:
+        return f"@{username}"
+    return ch.get("title") or ch.get("channel") or ch.get("key", "?")
+
+
+class FolderStatView(QWidget):
+    # period_table column index -> sortable (Most viewed post / Name / Website aren't).
+    _PERIOD_SORTABLE_COLS = {0, 1, 2, 3, 4, 6, 7}
+
+    def __init__(self, i18n, folder_store: FolderStore, channel_store: ChannelStore,
+                 parent=None) -> None:
+        super().__init__(parent)
+        self.i18n = i18n
+        self.folder_store = folder_store
+        self.channel_store = channel_store
+        self._channels: list[dict] = []
+        self._periods: dict[tuple, dict] = {}
+        self._period_mode = "season"
+        self._selected_period_key: tuple | None = None
+        self._period_btns: dict[tuple, QPushButton] = {}
+        self._period_entries: list[dict] = []
+        self._period_sort_col = 6   # Viral share, matching the previous fixed order
+        self._period_sort_desc = True
+        self._build_ui()
+
+    def tr_(self, key: str, **kw) -> str:
+        return self.i18n.tr(key, **kw)
+
+    # --------------------------------------------------------------- build
+    def _build_ui(self) -> None:
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(34, 28, 40, 24)
+        outer.setSpacing(16)
+
+        header = QVBoxLayout()
+        header.setSpacing(2)
+        self.title_lbl = QLabel(self.tr_("nav_folder_stat"))
+        self.title_lbl.setObjectName("pageTitle")
+        header.addWidget(self.title_lbl)
+        self.sub_lbl = QLabel(self.tr_("folder_stat_sub"))
+        self.sub_lbl.setObjectName("pageSub")
+        header.addWidget(self.sub_lbl)
+        outer.addLayout(header)
+
+        pick_row = QHBoxLayout()
+        self.pick_lbl = QLabel(self.tr_("folder_stat_pick_folder"))
+        pick_row.addWidget(self.pick_lbl)
+        self.folder_combo = QComboBox()
+        self.folder_combo.currentIndexChanged.connect(self._on_folder_changed)
+        pick_row.addWidget(self.folder_combo, 1)
+        outer.addLayout(pick_row)
+        outer.addWidget(hline())
+
+        self.no_folders_lbl = QLabel(self.tr_("folder_stat_no_folders"))
+        self.no_folders_lbl.setObjectName("navEmpty")
+        self.no_folders_lbl.setWordWrap(True)
+        outer.addWidget(self.no_folders_lbl)
+
+        self.empty_channels_lbl = QLabel(self.tr_("folder_stat_empty_channels"))
+        self.empty_channels_lbl.setObjectName("navEmpty")
+        self.empty_channels_lbl.setWordWrap(True)
+        outer.addWidget(self.empty_channels_lbl)
+
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.content = QWidget()
+        body = QVBoxLayout(self.content)
+        body.setContentsMargins(0, 6, 8, 0)
+        body.setSpacing(20)
+        scroll.setWidget(self.content)
+        outer.addWidget(scroll, 1)
+
+        body.addWidget(self._links_card())
+        body.addWidget(self._period_card(), 1)
+
+    def _links_card(self) -> SectionCard:
+        card = SectionCard(self.tr_("folder_stat_links_title"))
+        self.links_card_ref = card
+
+        self.links_hint_lbl = QLabel(self.tr_("folder_stat_links_hint"))
+        self.links_hint_lbl.setObjectName("hint")
+        self.links_hint_lbl.setWordWrap(True)
+        card.body.addWidget(self.links_hint_lbl)
+
+        self.links_empty_lbl = QLabel(self.tr_("folder_stat_links_empty"))
+        self.links_empty_lbl.setObjectName("hint")
+        card.body.addWidget(self.links_empty_lbl)
+
+        self.links_table = QTableWidget(0, 5)
+        self.links_table.setHorizontalHeaderLabels([
+            self.tr_("col_link_source"), self.tr_("col_link_target"),
+            self.tr_("col_link_reposts"), self.tr_("col_views"),
+            self.tr_("col_link_example")])
+        self.links_table.verticalHeader().setVisible(False)
+        self.links_table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
+        self.links_table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
+        self.links_table.horizontalHeader().setSectionResizeMode(
+            0, QHeaderView.ResizeMode.Stretch)
+        self.links_table.horizontalHeader().setSectionResizeMode(
+            1, QHeaderView.ResizeMode.Stretch)
+        self.links_table.cellDoubleClicked.connect(self._open_link_example)
+        card.body.addWidget(self.links_table)
+        return card
+
+    def _period_card(self) -> SectionCard:
+        card = SectionCard(self.tr_("folder_stat_period_title"))
+        self.period_card_ref = card
+
+        self.period_hint_lbl = QLabel(self.tr_("folder_stat_period_hint"))
+        self.period_hint_lbl.setObjectName("hint")
+        self.period_hint_lbl.setWordWrap(True)
+
+        self.mode_season_btn = QPushButton(self.tr_("period_mode_season"))
+        self.mode_season_btn.setObjectName("ghost")
+        self.mode_season_btn.setCheckable(True)
+        self.mode_month_btn = QPushButton(self.tr_("period_mode_month"))
+        self.mode_month_btn.setObjectName("ghost")
+        self.mode_month_btn.setCheckable(True)
+        self._mode_btn_group = QButtonGroup(self)
+        self._mode_btn_group.setExclusive(True)
+        self._mode_btn_group.addButton(self.mode_season_btn)
+        self._mode_btn_group.addButton(self.mode_month_btn)
+
+        self.period_md_btn = QPushButton(self.tr_("save_md_button"))
+        self.period_md_btn.clicked.connect(self._save_md)
+
+        self.picker_container = QWidget()
+        self.picker_lay = QVBoxLayout(self.picker_container)
+        self.picker_lay.setContentsMargins(0, 0, 0, 0)
+        self.picker_lay.setSpacing(8)
+
+        self.period_empty_lbl = QLabel(self.tr_("folder_stat_period_empty"))
+        self.period_empty_lbl.setObjectName("hint")
+
+        self.period_table = QTableWidget(0, 10)
+        self.period_table.setHorizontalHeaderLabels([
+            self.tr_("col_channel_title"), self.tr_("col_username_id"), self.tr_("col_views"),
+            self.tr_("col_shares"), self.tr_("col_reactions"), self.tr_("col_most_viewed"),
+            self.tr_("col_viral_share"), self.tr_("col_rating"), self.tr_("col_name"),
+            self.tr_("col_website")])
+        self.period_table.verticalHeader().setVisible(False)
+        self.period_table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
+        self.period_table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
+        period_header = self.period_table.horizontalHeader()
+        period_header.setSectionResizeMode(5, QHeaderView.ResizeMode.Stretch)
+        period_header.setSectionsClickable(True)
+        period_header.sectionClicked.connect(self._on_period_header_clicked)
+        self.period_table.cellDoubleClicked.connect(self._open_period_post)
+        self.period_table.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+
+        # Every widget the toggle handler touches now exists, so it's safe to
+        # wire the signal and set the default mode (which fires it once).
+        self.mode_season_btn.toggled.connect(lambda checked: self._on_mode_toggled("season", checked))
+        self.mode_month_btn.toggled.connect(lambda checked: self._on_mode_toggled("month", checked))
+        self.mode_season_btn.setChecked(True)
+
+        mode_row = QHBoxLayout()
+        mode_row.addWidget(self.mode_season_btn)
+        mode_row.addWidget(self.mode_month_btn)
+        mode_row.addStretch()
+        mode_row.addWidget(self.period_md_btn)
+
+        card.body.addWidget(self.period_hint_lbl)
+        card.body.addLayout(mode_row)
+        card.body.addWidget(self.picker_container)
+        card.body.addWidget(self.period_empty_lbl)
+        card.body.addWidget(self.period_table, 1)
+        return card
+
+    # --------------------------------------------------------------- data
+    def refresh(self) -> None:
+        """Reload folders + this folder's channels from disk. Call whenever
+        the view is shown, or folders/channels changed elsewhere."""
+        current_id = self.folder_combo.currentData()
+        self.folder_combo.blockSignals(True)
+        self.folder_combo.clear()
+        for folder in self.folder_store.list_folders():
+            self.folder_combo.addItem(folder["name"], folder["id"])
+        self.folder_combo.blockSignals(False)
+        if self.folder_combo.count():
+            idx = self.folder_combo.findData(current_id) if current_id else -1
+            self.folder_combo.setCurrentIndex(idx if idx >= 0 else 0)
+        self._reload_channels()
+
+    def _on_folder_changed(self, _index: int) -> None:
+        self._reload_channels()
+
+    def _reload_channels(self) -> None:
+        folder_id = self.folder_combo.currentData()
+        self._channels = []
+        if folder_id:
+            keys = [k for k, fid in self.folder_store.assignments.items() if fid == folder_id]
+            for key in keys:
+                data = self.channel_store.load(key)
+                if data:
+                    data.setdefault("key", key)
+                    self._channels.append(data)
+
+        has_folders = self.folder_combo.count() > 0
+        has_channels = bool(self._channels)
+        self.no_folders_lbl.setVisible(not has_folders)
+        self.pick_lbl.setVisible(has_folders)
+        self.folder_combo.setVisible(has_folders)
+        self.empty_channels_lbl.setVisible(has_folders and not has_channels)
+        self.content.setVisible(has_channels)
+
+        self._rebuild_links_table()
+        self._rebuild_period_picker()
+
+    # -------------------------------------------------------------- links
+    def _collect_links(self) -> list[dict]:
+        index: dict[str, dict] = {}
+        for ch in self._channels:
+            uname = (ch.get("username") or "").lower()
+            cid = str(ch.get("info", {}).get("id") or "")
+            if uname:
+                index[uname] = ch
+            if cid:
+                index[cid] = ch
+
+        edges: dict[tuple, dict] = {}
+        for ch in self._channels:
+            for row in ch.get("rows", []) or []:
+                pub = row.get("public")
+                if not pub or pub.get("count", 0) <= 0:
+                    continue
+                for item in pub.get("items", []) or []:
+                    link = item.get("link", "")
+                    target = index.get(_extract_ident(link))
+                    if not target or target.get("key") == ch.get("key"):
+                        continue
+                    key = (ch["key"], target["key"])
+                    edge = edges.setdefault(key, {
+                        "source": _channel_label(ch), "target": _channel_label(target),
+                        "count": 0, "views": 0, "example": link,
+                    })
+                    edge["count"] += 1
+                    edge["views"] += int(item.get("views", 0) or 0)
+        return sorted(edges.values(), key=lambda e: e["count"], reverse=True)
+
+    def _rebuild_links_table(self) -> None:
+        edges = self._collect_links()
+        self.links_empty_lbl.setVisible(not edges)
+        self.links_table.setVisible(bool(edges))
+        self.links_table.setRowCount(len(edges))
+        for i, edge in enumerate(edges):
+            self.links_table.setItem(i, 0, QTableWidgetItem(edge["source"]))
+            self.links_table.setItem(i, 1, QTableWidgetItem(edge["target"]))
+            self.links_table.setItem(i, 2, QTableWidgetItem(fmt_int(edge["count"])))
+            self.links_table.setItem(i, 3, QTableWidgetItem(fmt_int(edge["views"])))
+            example = QTableWidgetItem(self.tr_("show"))
+            example.setToolTip(edge["example"])
+            example.setData(Qt.ItemDataRole.UserRole, edge["example"])
+            self.links_table.setItem(i, 4, example)
+
+    def _open_link_example(self, row: int, _col: int) -> None:
+        item = self.links_table.item(row, 4)
+        link = item.data(Qt.ItemDataRole.UserRole) if item else None
+        if link:
+            QDesktopServices.openUrl(QUrl(link))
+
+    # ------------------------------------------------------------- periods
+    def _collect_periods(self, mode: str) -> dict[tuple, dict]:
+        """Per-period totals for the *currently selected folder's* channels."""
+        periods: dict[tuple, dict] = {}
+        for ch in self._channels:
+            buckets: dict[tuple, list[dict]] = {}
+            for row in ch.get("rows", []) or []:
+                dt = _parse_date(row.get("date", ""))
+                if dt is None:
+                    continue
+                key, label = _period_key_label(dt, mode)
+                buckets.setdefault(key, (label, []))[1].append(row)
+            for key, (label, rows) in buckets.items():
+                n = len(rows)
+                if not n:
+                    continue
+                views = sum(int(r.get("views", 0) or 0) for r in rows)
+                shares = sum(int(r.get("forwards", 0) or 0) for r in rows)
+                reactions = sum(int(r.get("reactions", 0) or 0) for r in rows)
+                avg_views = views / n
+                viral_count = (sum(1 for r in rows if int(r.get("views", 0) or 0) > 2 * avg_views)
+                              if avg_views else 0)
+                top_row = max(rows, key=lambda r: int(r.get("views", 0) or 0))
+                bucket = periods.setdefault(key, {"label": label, "entries": []})
+                bucket["entries"].append({
+                    "channel": ch, "views": views, "shares": shares,
+                    "reactions": reactions, "top_row": top_row,
+                    "viral_share": viral_count / n * 100,
+                })
+        for bucket in periods.values():
+            self._score_entries(bucket["entries"])
+        return periods
+
+    @staticmethod
+    def _score_entries(entries: list[dict]) -> None:
+        """Composite 0-1 rating per entry, min-max normalized against the
+        other channels in the same period bucket."""
+        if not entries:
+            return
+        viral_vals = [e["viral_share"] for e in entries]
+        views_vals = [e["views"] for e in entries]
+        eng_vals = [e["shares"] + e["reactions"] for e in entries]
+        v_min, v_max = min(viral_vals), max(viral_vals)
+        vw_min, vw_max = min(views_vals), max(views_vals)
+        eg_min, eg_max = min(eng_vals), max(eng_vals)
+        for e in entries:
+            viral_norm = (e["viral_share"] - v_min) / (v_max - v_min) if v_max != v_min else 0
+            views_norm = (e["views"] - vw_min) / (vw_max - vw_min) if vw_max != vw_min else 0
+            eng = e["shares"] + e["reactions"]
+            eng_norm = (eng - eg_min) / (eg_max - eg_min) if eg_max != eg_min else 0
+            e["score"] = 0.5 * viral_norm + 0.35 * views_norm + 0.15 * eng_norm
+
+    def _collect_all_period_keys(self, mode: str) -> list[tuple[tuple, str]]:
+        """Every period key/label across *all* tracked channels, regardless of
+        folder — this is what drives the picker buttons, so the grid of
+        available periods doesn't change when you switch folders."""
+        keys: dict[tuple, str] = {}
+        for summary in self.channel_store.list():
+            data = self.channel_store.load(summary["key"])
+            if not data:
+                continue
+            for row in data.get("rows", []) or []:
+                dt = _parse_date(row.get("date", ""))
+                if dt is None:
+                    continue
+                key, label = _period_key_label(dt, mode)
+                keys[key] = label
+        return sorted(keys.items(), key=lambda kv: kv[0], reverse=True)
+
+    # ------------------------------------------------------- period picker
+    @staticmethod
+    def _clear_layout(layout) -> None:
+        while layout.count():
+            item = layout.takeAt(0)
+            w = item.widget()
+            if w is not None:
+                w.deleteLater()
+                continue
+            sub = item.layout()
+            if sub is not None:
+                FolderStatView._clear_layout(sub)
+
+    def _on_mode_toggled(self, mode: str, checked: bool) -> None:
+        if not checked:
+            return
+        self._period_mode = mode
+        self._selected_period_key = None
+        self._rebuild_period_picker()
+
+    def _make_period_button(self, text: str, key: tuple) -> QPushButton:
+        btn = QPushButton(text)
+        btn.setObjectName("ghost")
+        btn.setCheckable(True)
+        btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._period_btn_group.addButton(btn)
+        btn.toggled.connect(lambda checked, k=key: self._on_period_button_toggled(k, checked))
+        self._period_btns[key] = btn
+        return btn
+
+    def _build_season_picker(self, keys_labels: list[tuple[tuple, str]]) -> None:
+        row_widget = QWidget()
+        row_lay = QHBoxLayout(row_widget)
+        row_lay.setContentsMargins(0, 0, 0, 0)
+        row_lay.setSpacing(6)
+        for key, label in keys_labels:
+            row_lay.addWidget(self._make_period_button(label, key))
+        row_lay.addStretch()
+
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setWidget(row_widget)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        scroll.setFixedHeight(48)
+        self.picker_lay.addWidget(scroll)
+
+    def _build_month_picker(self, keys_labels: list[tuple[tuple, str]]) -> None:
+        years = sorted({key[0] for key, _ in keys_labels}, reverse=True)
+
+        grid_widget = QWidget()
+        grid_lay = QVBoxLayout(grid_widget)
+        grid_lay.setContentsMargins(0, 0, 0, 0)
+        grid_lay.setSpacing(6)
+        for year in years:
+            year_row = QHBoxLayout()
+            year_row.setSpacing(6)
+            year_lbl = QLabel(f"{year}:")
+            year_lbl.setMinimumWidth(52)
+            year_lbl.setStyleSheet("font-weight: 700;")
+            year_row.addWidget(year_lbl)
+            for m in range(1, 13):
+                year_row.addWidget(self._make_period_button(MONTHS_FULL[m], (year, m)))
+            year_row.addStretch()
+            grid_lay.addLayout(year_row)
+
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setWidget(grid_widget)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        scroll.setFixedHeight(min(220, 46 * max(len(years), 1) + 10))
+        self.picker_lay.addWidget(scroll)
+
+    def _rebuild_period_picker(self) -> None:
+        self._clear_layout(self.picker_lay)
+        self._period_btn_group = QButtonGroup(self)
+        self._period_btn_group.setExclusive(True)
+        self._period_btns = {}
+
+        keys_labels = self._collect_all_period_keys(self._period_mode)
+        if self._period_mode == "season":
+            self._build_season_picker(keys_labels)
+        else:
+            self._build_month_picker(keys_labels)
+
+        if keys_labels:
+            target = (self._selected_period_key if self._selected_period_key in self._period_btns
+                      else keys_labels[0][0])
+            self._period_btns[target].setChecked(True)
+        else:
+            self._selected_period_key = None
+            self._rebuild_selected_period_table()
+
+    def _on_period_button_toggled(self, key: tuple, checked: bool) -> None:
+        if not checked:
+            return
+        self._selected_period_key = key
+        self._rebuild_selected_period_table()
+
+    def _rebuild_selected_period_table(self) -> None:
+        self._periods = self._collect_periods(self._period_mode)
+        bucket = self._periods.get(self._selected_period_key) if self._selected_period_key else None
+        self._period_entries = list(bucket["entries"]) if bucket else []
+        self._render_period_table()
+
+    def _period_sort_value(self, entry: dict, col: int):
+        ch = entry["channel"]
+        if col == 0:
+            return _channel_title(ch).lower()
+        if col == 1:
+            return _channel_uid(ch).lower()
+        if col == 2:
+            return entry["views"]
+        if col == 3:
+            return entry["shares"]
+        if col == 4:
+            return entry["reactions"]
+        if col == 6:
+            return entry["viral_share"]
+        if col == 7:
+            return entry["score"]
+        return 0
+
+    def _on_period_header_clicked(self, col: int) -> None:
+        if col not in self._PERIOD_SORTABLE_COLS:
+            return
+        if col == self._period_sort_col:
+            self._period_sort_desc = not self._period_sort_desc
+        else:
+            self._period_sort_col, self._period_sort_desc = col, True
+        self._render_period_table()
+
+    def _render_period_table(self) -> None:
+        entries = sorted(self._period_entries,
+                         key=lambda e: self._period_sort_value(e, self._period_sort_col),
+                         reverse=self._period_sort_desc)
+
+        self.period_empty_lbl.setVisible(not entries)
+        self.period_table.setVisible(bool(entries))
+        self.period_table.setRowCount(len(entries))
+        for i, entry in enumerate(entries):
+            ch = entry["channel"]
+            self.period_table.setItem(i, 0, QTableWidgetItem(_channel_title(ch)))
+            self.period_table.setItem(i, 1, QTableWidgetItem(_channel_uid(ch)))
+            self.period_table.setItem(i, 2, QTableWidgetItem(fmt_int(entry["views"])))
+            self.period_table.setItem(i, 3, QTableWidgetItem(fmt_int(entry["shares"])))
+            self.period_table.setItem(i, 4, QTableWidgetItem(fmt_int(entry["reactions"])))
+
+            top_row = entry["top_row"]
+            snippet = (top_row.get("text") or f"#{top_row.get('id')}").strip()
+            if len(snippet) > 60:
+                snippet = snippet[:59] + "…"
+            link = build_post_link(ch.get("channel") or ch.get("username") or "",
+                                   top_row.get("id", 0))
+            post_item = QTableWidgetItem(snippet or f"#{top_row.get('id')}")
+            post_item.setToolTip(link)
+            post_item.setData(Qt.ItemDataRole.UserRole, link)
+            self.period_table.setItem(i, 5, post_item)
+
+            self.period_table.setItem(i, 6, QTableWidgetItem(f"{entry['viral_share']:.4f}%"))
+            self.period_table.setItem(i, 7, QTableWidgetItem(f"{entry['score']:.3f}"))
+            self.period_table.setItem(i, 8, QTableWidgetItem(""))
+            self.period_table.setItem(i, 9, QTableWidgetItem(""))
+
+        order = (Qt.SortOrder.DescendingOrder if self._period_sort_desc
+                 else Qt.SortOrder.AscendingOrder)
+        self.period_table.horizontalHeader().setSortIndicatorShown(True)
+        self.period_table.horizontalHeader().setSortIndicator(self._period_sort_col, order)
+
+    def _open_period_post(self, row: int, _col: int) -> None:
+        item = self.period_table.item(row, 5)
+        link = item.data(Qt.ItemDataRole.UserRole) if item else None
+        if link:
+            QDesktopServices.openUrl(QUrl(link))
+
+    # ------------------------------------------------------------- export
+    def _build_md(self) -> str:
+        headers = [self.tr_("col_username_id"), self.tr_("col_views"), self.tr_("col_shares"),
+                   self.tr_("col_reactions"), self.tr_("col_most_viewed"),
+                   self.tr_("col_viral_share"), self.tr_("col_rating"),
+                   self.tr_("col_name"), self.tr_("col_website")]
+        lines = [f"# {self.folder_combo.currentText()}", ""]
+        for key in sorted(self._periods):
+            bucket = self._periods[key]
+            lines.append(f"## {bucket['label']}")
+            lines.append("")
+            lines.append("| " + " | ".join(headers) + " |")
+            lines.append("| " + " | ".join(["---"] * len(headers)) + " |")
+            for entry in sorted(bucket["entries"], key=lambda e: e["viral_share"], reverse=True):
+                ch = entry["channel"]
+                top_row = entry["top_row"]
+                text = (top_row.get("full_text") or top_row.get("text")
+                       or f"#{top_row.get('id')}")
+                text = text.replace("|", "\\|").replace("\n", " ").strip() or f"#{top_row.get('id')}"
+                link = build_post_link(ch.get("channel") or ch.get("username") or "",
+                                       top_row.get("id", 0))
+                lines.append(
+                    f"| {_channel_uid(ch)} | {entry['views']} | {entry['shares']} | "
+                    f"{entry['reactions']} | [{text}]({link}) | {entry['viral_share']:.4f}% | "
+                    f"{entry['score']:.3f} |  |  |")
+            lines.append("")
+        return "\n".join(lines).rstrip("\n") + "\n"
+
+    def _save_md(self) -> None:
+        if not self._periods:
+            QMessageBox.information(self, self.tr_("app_title"),
+                                    self.tr_("folder_stat_period_empty"))
+            return
+        default = f"{self.folder_combo.currentText() or 'folder'}_stats.md"
+        path, _ = QFileDialog.getSaveFileName(
+            self, self.tr_("save_md_button"), default, "Markdown (*.md)")
+        if not path:
+            return
+        try:
+            with open(path, "w", encoding="utf-8") as f:
+                f.write(self._build_md())
+        except OSError as exc:
+            QMessageBox.warning(self, self.tr_("app_title"), str(exc))
+            return
+        QMessageBox.information(self, self.tr_("app_title"),
+                                self.tr_("md_saved", path=path))
+
+    # ---------------------------------------------------------- translate
+    def retranslate(self) -> None:
+        self.title_lbl.setText(self.tr_("nav_folder_stat"))
+        self.sub_lbl.setText(self.tr_("folder_stat_sub"))
+        self.pick_lbl.setText(self.tr_("folder_stat_pick_folder"))
+        self.no_folders_lbl.setText(self.tr_("folder_stat_no_folders"))
+        self.empty_channels_lbl.setText(self.tr_("folder_stat_empty_channels"))
+
+        self.links_card_ref.title_lbl.setText(self.tr_("folder_stat_links_title"))
+        self.links_hint_lbl.setText(self.tr_("folder_stat_links_hint"))
+        self.links_empty_lbl.setText(self.tr_("folder_stat_links_empty"))
+        self.links_table.setHorizontalHeaderLabels([
+            self.tr_("col_link_source"), self.tr_("col_link_target"),
+            self.tr_("col_link_reposts"), self.tr_("col_views"),
+            self.tr_("col_link_example")])
+
+        self.period_card_ref.title_lbl.setText(self.tr_("folder_stat_period_title"))
+        self.period_hint_lbl.setText(self.tr_("folder_stat_period_hint"))
+        self.mode_season_btn.setText(self.tr_("period_mode_season"))
+        self.mode_month_btn.setText(self.tr_("period_mode_month"))
+        self.period_md_btn.setText(self.tr_("save_md_button"))
+        self.period_empty_lbl.setText(self.tr_("folder_stat_period_empty"))
+        self.period_table.setHorizontalHeaderLabels([
+            self.tr_("col_channel_title"), self.tr_("col_username_id"), self.tr_("col_views"),
+            self.tr_("col_shares"), self.tr_("col_reactions"), self.tr_("col_most_viewed"),
+            self.tr_("col_viral_share"), self.tr_("col_rating"), self.tr_("col_name"),
+            self.tr_("col_website")])

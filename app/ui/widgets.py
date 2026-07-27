@@ -6,13 +6,27 @@ analytics_dashboard cards do.
 """
 from __future__ import annotations
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import QEvent, Qt
+from PySide6.QtGui import QColor, QIcon, QPainter, QPixmap
 from PySide6.QtWidgets import (
-    QFrame, QHBoxLayout, QLabel, QPushButton, QVBoxLayout, QWidget,
+    QFrame, QHBoxLayout, QLabel, QPushButton, QToolTip, QVBoxLayout, QWidget,
 )
 
 from .charts import Sparkline
 from .theme import COLORS, add_shadow, svg_pixmap
+
+
+def folder_icon(color: str) -> QIcon:
+    """Small filled dot used to represent a folder's color in menus/buttons."""
+    pixmap = QPixmap(14, 14)
+    pixmap.fill(Qt.GlobalColor.transparent)
+    painter = QPainter(pixmap)
+    painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+    painter.setBrush(QColor(color))
+    painter.setPen(Qt.PenStyle.NoPen)
+    painter.drawEllipse(1, 1, 12, 12)
+    painter.end()
+    return QIcon(pixmap)
 
 
 class Card(QFrame):
@@ -152,6 +166,8 @@ class NavButton(QPushButton):
         self.setCheckable(True)
         self.setCursor(Qt.CursorShape.PointingHandCursor)
         self._icon_name = icon_name
+        self._folder_color: str | None = None
+        self._folder_name: str | None = None
 
         lay = QHBoxLayout(self)
         lay.setContentsMargins(12, 0, 12, 0)
@@ -160,11 +176,6 @@ class NavButton(QPushButton):
         self._icon.setFixedSize(22, 22)
         self._icon.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
         lay.addWidget(self._icon)
-        self._dot = QLabel()
-        self._dot.setFixedSize(8, 8)
-        self._dot.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
-        self._dot.setVisible(False)
-        lay.addWidget(self._dot)
         self._label = QLabel(text)
         self._label.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
         lay.addWidget(self._label, 1)
@@ -179,7 +190,7 @@ class NavButton(QPushButton):
         self._sync_icon(False)
 
     def _sync_icon(self, checked: bool) -> None:
-        color = COLORS["accent"] if checked else COLORS["muted"]
+        color = self._folder_color or (COLORS["accent"] if checked else COLORS["muted"])
         self._icon.setPixmap(svg_pixmap(self._icon_name, color, 20))
 
     def set_text(self, text: str) -> None:
@@ -188,10 +199,19 @@ class NavButton(QPushButton):
     def set_meta(self, text: str) -> None:
         self._meta.setText(text)
 
-    def set_folder_color(self, color: str | None) -> None:
-        if color:
-            self._dot.setStyleSheet(f"background:{color}; border-radius:4px;")
-        self._dot.setVisible(bool(color))
+    def set_folder_color(self, color: str | None, name: str | None = None) -> None:
+        self._folder_color = color
+        self._folder_name = name if color else None
+        self._sync_icon(self.isChecked())
+
+    def event(self, e) -> bool:
+        # Hovering the icon shows the assigned folder's name, distinct from
+        # the button's own tooltip (channel/title) covering the rest of it.
+        if (e.type() == QEvent.Type.ToolTip and self._folder_name
+                and self._icon.geometry().contains(e.pos())):
+            QToolTip.showText(e.globalPos(), self._folder_name, self)
+            return True
+        return super().event(e)
 
 
 def hline() -> QFrame:

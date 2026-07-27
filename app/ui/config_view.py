@@ -6,9 +6,11 @@ channel_stat tool in a background worker and emits the finished payload.
 """
 from __future__ import annotations
 
+import html
 import json
 
-from PySide6.QtCore import Qt, Signal
+from PySide6.QtCore import Qt, QUrl, Signal
+from PySide6.QtGui import QDesktopServices
 from PySide6.QtWidgets import (
     QCheckBox, QComboBox, QFileDialog, QFormLayout, QGroupBox, QHBoxLayout,
     QInputDialog, QLabel, QLineEdit, QMessageBox, QPlainTextEdit, QProgressBar,
@@ -16,8 +18,10 @@ from PySide6.QtWidgets import (
 )
 
 from ..config import CONN_FIELDS, config_dir
+from ..folders import FolderStore
 from ..tools.channel_stat import run_channel_stat
 from ..worker import CheckLoginWorker, ToolWorker
+from .folder_dialog import FolderManagerDialog
 from .qr_login_dialog import QrLoginDialog
 from .widgets import Card, SectionCard
 
@@ -26,11 +30,13 @@ PERIOD_KEYS = ["3m", "6m", "1y", "2y", "3y", "all"]
 
 class ConfigView(QWidget):
     channel_fetched = Signal(dict)   # full channel_stat payload
+    folders_changed = Signal()
 
-    def __init__(self, cfg, i18n, parent=None) -> None:
+    def __init__(self, cfg, i18n, folder_store: FolderStore, parent=None) -> None:
         super().__init__(parent)
         self.cfg = cfg
         self.i18n = i18n
+        self.folder_store = folder_store
         self.worker: ToolWorker | None = None
         self._build_ui()
         self._load_fields()
@@ -67,6 +73,7 @@ class ConfigView(QWidget):
         root.addWidget(self._connection_card())
         root.addWidget(self._fetch_card())
         root.addWidget(self._instructions_card())
+        root.addWidget(self._folders_card())
         root.addStretch()
 
     def _connection_card(self) -> Card:
@@ -118,11 +125,20 @@ class ConfigView(QWidget):
         self.status.setWordWrap(True)
         card.body.addWidget(self.status)
 
+        loc_row = QHBoxLayout()
         self.loc_lbl = QLabel(self.tr_("config_location", path=str(self.cfg.path)))
         self.loc_lbl.setObjectName("hint")
         self.loc_lbl.setWordWrap(True)
-        card.body.addWidget(self.loc_lbl)
+        loc_row.addWidget(self.loc_lbl, 1)
+        self.open_folder_btn = QPushButton(self.tr_("open_config_folder"))
+        self.open_folder_btn.setObjectName("ghost")
+        self.open_folder_btn.clicked.connect(self._open_config_folder)
+        loc_row.addWidget(self.open_folder_btn)
+        card.body.addLayout(loc_row)
         return card
+
+    def _open_config_folder(self) -> None:
+        QDesktopServices.openUrl(QUrl.fromLocalFile(str(config_dir())))
 
     def _fetch_card(self) -> Card:
         card = SectionCard(self.tr_("fetch_title"))
@@ -192,6 +208,52 @@ class ConfigView(QWidget):
         box.toggled.connect(self.instructions_info.setVisible)
         return box
 
+    def _folders_card(self) -> Card:
+        card = SectionCard(self.tr_("folder_section_title"))
+        self.folders_card_ref = card
+
+        self.folders_help_lbl = QLabel(self.tr_("folder_manage_help"))
+        self.folders_help_lbl.setObjectName("hint")
+        self.folders_help_lbl.setWordWrap(True)
+        card.body.addWidget(self.folders_help_lbl)
+
+        self.folders_list_lbl = QLabel()
+        self.folders_list_lbl.setObjectName("hint")
+        self.folders_list_lbl.setWordWrap(True)
+        self.folders_list_lbl.setTextFormat(Qt.TextFormat.RichText)
+        card.body.addWidget(self.folders_list_lbl)
+
+        row = QHBoxLayout()
+        self.folders_manage_btn = QPushButton(self.tr_("folder_manage"))
+        self.folders_manage_btn.clicked.connect(self._open_folder_manager)
+        row.addWidget(self.folders_manage_btn)
+        row.addStretch()
+        card.body.addLayout(row)
+
+        self.refresh_folders_list()
+        return card
+
+    def refresh_folders_list(self) -> None:
+        folders = self.folder_store.list_folders()
+        if not folders:
+            self.folders_list_lbl.setText(self.tr_("folder_list_empty"))
+            return
+        counts: dict[str, int] = {}
+        for fid in self.folder_store.assignments.values():
+            counts[fid] = counts.get(fid, 0) + 1
+        chips = [
+            f'<span style="color:{html.escape(f["color"])};">&#9679;</span> '
+            f'{html.escape(f["name"])} ({counts.get(f["id"], 0)})'
+            for f in folders
+        ]
+        self.folders_list_lbl.setText("&nbsp;&nbsp;&nbsp;".join(chips))
+
+    def _open_folder_manager(self) -> None:
+        dlg = FolderManagerDialog(self.folder_store, self.i18n, self)
+        dlg.exec()
+        self.refresh_folders_list()
+        self.folders_changed.emit()
+
     # ---------------------------------------------------------- translate
     def retranslate(self) -> None:
         self.title_lbl.setText(self.tr_("nav_config"))
@@ -207,6 +269,7 @@ class ConfigView(QWidget):
         self.qr_btn.setText(self.tr_("qr_login_button"))
         self.check_login_btn.setText(self.tr_("check_login_button"))
         self.loc_lbl.setText(self.tr_("config_location", path=str(self.cfg.path)))
+        self.open_folder_btn.setText(self.tr_("open_config_folder"))
 
         self.fetch_card_ref.title_lbl.setText(self.tr_("fetch_title"))
         self.fetch_help_lbl.setText(self.tr_("fetch_help"))
@@ -228,6 +291,11 @@ class ConfigView(QWidget):
 
         self.instructions_box.setTitle(self.tr_("instructions_title"))
         self.instructions_info.setText(self.tr_("instructions_text"))
+
+        self.folders_card_ref.title_lbl.setText(self.tr_("folder_section_title"))
+        self.folders_help_lbl.setText(self.tr_("folder_manage_help"))
+        self.folders_manage_btn.setText(self.tr_("folder_manage"))
+        self.refresh_folders_list()
 
     # ------------------------------------------------------ field helpers
     def _load_fields(self) -> None:

@@ -11,19 +11,21 @@ from __future__ import annotations
 from datetime import datetime
 
 from PySide6.QtCore import Qt, QUrl
-from PySide6.QtGui import QDesktopServices
+from PySide6.QtGui import QDesktopServices, QIcon
 from PySide6.QtWidgets import (
     QAbstractItemView, QApplication, QDialog, QDialogButtonBox, QFileDialog,
-    QGridLayout, QHBoxLayout, QHeaderView, QLabel, QMessageBox, QPlainTextEdit,
-    QPushButton, QScrollArea, QTableWidget, QTableWidgetItem, QVBoxLayout,
-    QWidget,
+    QGridLayout, QHBoxLayout, QHeaderView, QLabel, QMenu, QMessageBox,
+    QPlainTextEdit, QPushButton, QScrollArea, QTableWidget, QTableWidgetItem,
+    QVBoxLayout, QWidget,
 )
 
 from PySide6.QtCore import Signal
 
+from ..folders import FolderStore
 from .charts import BarChart
+from .folder_dialog import FolderManagerDialog
 from .theme import COLORS
-from .widgets import Card, ChartCard, SectionCard, StatCard, hline
+from .widgets import Card, ChartCard, SectionCard, StatCard, folder_icon, hline
 
 MONTHS_SHORT = ["", "Jan", "Feb", "Mar", "Apr", "May", "Jun",
                 "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
@@ -135,13 +137,15 @@ class ChannelReportDialog(QDialog):
 class DashboardView(QWidget):
     refetch_requested = Signal(dict)
     remove_requested = Signal(str)
+    folders_changed = Signal()
 
     # table column index -> row-dict key (None = not sortable)
     _SORT_KEYS = {0: "ts", 2: "views", 3: "reactions", 4: "forwards", 5: "public"}
 
-    def __init__(self, i18n, parent=None) -> None:
+    def __init__(self, i18n, folder_store: FolderStore, parent=None) -> None:
         super().__init__(parent)
         self.i18n = i18n
+        self.folder_store = folder_store
         self._data: dict = {}
         self._rows: list[dict] = []
         self._channel_text = ""
@@ -180,6 +184,11 @@ class DashboardView(QWidget):
         head.addLayout(titles)
         head.addStretch()
 
+        self.folder_btn = QPushButton(self.tr_("folder_none"))
+        self.folder_btn.setObjectName("ghost")
+        self.folder_btn.setToolTip(self.tr_("folder_choose"))
+        self.folder_btn.clicked.connect(self._show_folder_menu)
+        head.addWidget(self.folder_btn)
         self.report_btn = QPushButton(self.tr_("report_button"))
         self.report_btn.clicked.connect(self._show_report)
         head.addWidget(self.report_btn)
@@ -207,6 +216,7 @@ class DashboardView(QWidget):
         outer.addWidget(scroll, 1)
 
         self._build_stat_cards()
+        self._build_top_viral_table()
         self._build_charts()
         self._build_table()
 
@@ -240,6 +250,22 @@ class DashboardView(QWidget):
         for col in range(4):
             grid.setColumnStretch(col, 1)
         self.body.addLayout(grid)
+
+    def _build_top_viral_table(self) -> None:
+        self.top_viral_card = SectionCard(self.tr_("top_viral_title"))
+        self.top_viral_table = QTableWidget(0, 6)
+        self.top_viral_table.setHorizontalHeaderLabels([
+            self.tr_("col_date"), self.tr_("col_post"), self.tr_("col_views"),
+            self.tr_("col_reactions"), self.tr_("col_private"), self.tr_("col_viral_rate")])
+        self.top_viral_table.verticalHeader().setVisible(False)
+        self.top_viral_table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
+        self.top_viral_table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
+        self.top_viral_table.horizontalHeader().setSectionResizeMode(
+            1, QHeaderView.ResizeMode.Stretch)
+        self.top_viral_table.cellDoubleClicked.connect(self._open_viral_row)
+        self.top_viral_table.setMinimumHeight(360)  # header + at least 10 rows
+        self.top_viral_card.body.addWidget(self.top_viral_table)
+        self.body.addWidget(self.top_viral_card)
 
     def _build_charts(self) -> None:
         self.activity_chart = BarChart(accent=COLORS["activity"], max_labels=999)
@@ -289,6 +315,62 @@ class DashboardView(QWidget):
         self._fill_cards()
         self._fill_charts()
         self._rebuild_table()
+        self._rebuild_top_viral_table()
+        self.refresh_folder_button()
+
+    # -------------------------------------------------------------- folders
+    def refresh_folder_button(self) -> None:
+        key = self._data.get("key")
+        folder_id = self.folder_store.folder_for_channel(key) if key else None
+        folder = self.folder_store.get_folder(folder_id) if folder_id else None
+        if folder:
+            self.folder_btn.setIcon(folder_icon(folder["color"]))
+            self.folder_btn.setText(folder["name"])
+        else:
+            self.folder_btn.setIcon(QIcon())
+            self.folder_btn.setText(self.tr_("folder_none"))
+
+    def _show_folder_menu(self) -> None:
+        key = self._data.get("key")
+        if not key:
+            return
+        menu = QMenu(self)
+        current = self.folder_store.folder_for_channel(key)
+
+        none_act = menu.addAction(self.tr_("folder_none"))
+        none_act.setCheckable(True)
+        none_act.setChecked(current is None)
+        none_act.triggered.connect(lambda: self._assign_folder(None))
+
+        folders = self.folder_store.list_folders()
+        if folders:
+            menu.addSeparator()
+            for folder in folders:
+                act = menu.addAction(folder_icon(folder["color"]), folder["name"])
+                act.setCheckable(True)
+                act.setChecked(folder["id"] == current)
+                act.triggered.connect(
+                    lambda _=False, fid=folder["id"]: self._assign_folder(fid))
+
+        menu.addSeparator()
+        manage_act = menu.addAction(self.tr_("folder_manage"))
+        manage_act.triggered.connect(self._open_folder_manager)
+
+        menu.exec(self.folder_btn.mapToGlobal(self.folder_btn.rect().bottomLeft()))
+
+    def _assign_folder(self, folder_id: str | None) -> None:
+        key = self._data.get("key")
+        if not key:
+            return
+        self.folder_store.set_channel_folder(key, folder_id)
+        self.refresh_folder_button()
+        self.folders_changed.emit()
+
+    def _open_folder_manager(self) -> None:
+        dlg = FolderManagerDialog(self.folder_store, self.i18n, self)
+        dlg.exec()
+        self.refresh_folder_button()
+        self.folders_changed.emit()
 
     def _header_sub(self) -> str:
         parts = []
@@ -458,6 +540,43 @@ class DashboardView(QWidget):
         self.table.horizontalHeader().setSortIndicatorShown(True)
         self.table.horizontalHeader().setSortIndicator(self._sort_col, order)
 
+    # ---------------------------------------------------- top viral table
+    def _viral_rate(self, views: int, avg_views: float) -> float:
+        return (views / avg_views) if avg_views else 0.0
+
+    def _rebuild_top_viral_table(self) -> None:
+        avg_views = self._data.get("stats", {}).get("avg_views", 0) or 0
+        rows = sorted(self._rows,
+                      key=lambda r: self._viral_rate(r.get("views", 0) or 0, avg_views),
+                      reverse=True)[:10]
+        self.top_viral_table.setRowCount(len(rows))
+        for i, r in enumerate(rows):
+            link = build_post_link(self._channel_text, r["id"])
+            self.top_viral_table.setItem(i, 0, QTableWidgetItem(self._fmt_date(r.get("date", ""))))
+
+            post_text = r.get("text", "") or f"#{r['id']}"
+            album_ids = r.get("ids") or [r["id"]]
+            if len(album_ids) > 1:
+                post_text += self.tr_("album_suffix", n=len(album_ids))
+            post_item = QTableWidgetItem(post_text)
+            post_item.setToolTip(link)
+            post_item.setData(Qt.ItemDataRole.UserRole, link)
+            self.top_viral_table.setItem(i, 1, post_item)
+
+            self.top_viral_table.setItem(i, 2, QTableWidgetItem(fmt_int(r.get("views", 0))))
+            self.top_viral_table.setItem(i, 3, QTableWidgetItem(fmt_int(r.get("reactions", 0))))
+            self.top_viral_table.setItem(i, 4, QTableWidgetItem(fmt_int(r.get("forwards", 0))))
+            rate = self._viral_rate(r.get("views", 0) or 0, avg_views)
+            rate_text = f"{rate:.2f}×" if avg_views else "—"
+            self.top_viral_table.setItem(i, 5, QTableWidgetItem(rate_text))
+
+    def _open_viral_row(self, row: int, _col: int) -> None:
+        item = self.top_viral_table.item(row, 1)
+        if item:
+            link = item.data(Qt.ItemDataRole.UserRole)
+            if link:
+                QDesktopServices.openUrl(QUrl(link))
+
     def _public_cell(self, row: dict) -> QWidget:
         cell = QWidget()
         lay = QHBoxLayout(cell)
@@ -612,6 +731,7 @@ class DashboardView(QWidget):
 
     # ---------------------------------------------------------- translate
     def retranslate(self) -> None:
+        self.folder_btn.setToolTip(self.tr_("folder_choose"))
         self.report_btn.setText(self.tr_("report_button"))
         self.md_btn.setText(self.tr_("save_md_button"))
         self.refetch_btn.setText(self.tr_("dash_refresh"))
@@ -623,6 +743,10 @@ class DashboardView(QWidget):
         self.table.setHorizontalHeaderLabels([
             self.tr_("col_date"), self.tr_("col_post"), self.tr_("col_views"),
             self.tr_("col_reactions"), self.tr_("col_private"), self.tr_("col_public")])
+        self.top_viral_card.title_lbl.setText(self.tr_("top_viral_title"))
+        self.top_viral_table.setHorizontalHeaderLabels([
+            self.tr_("col_date"), self.tr_("col_post"), self.tr_("col_views"),
+            self.tr_("col_reactions"), self.tr_("col_private"), self.tr_("col_viral_rate")])
         keymap = {"members": "stat_members", "avg_views": "stat_avg_views",
                   "max_views": "stat_max_views", "posts_per_day": "stat_posts_per_day",
                   "avg_reactions": "stat_avg_reactions", "avg_reposts": "stat_avg_reposts",
@@ -640,3 +764,4 @@ class DashboardView(QWidget):
             self._cards[key].setToolTip(self.tr_(tip_key))
         if self._data:
             self.sub_lbl.setText(self._header_sub())
+        self.refresh_folder_button()
