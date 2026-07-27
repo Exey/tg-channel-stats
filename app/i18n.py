@@ -48,9 +48,11 @@ EN = {
     "col_link_reposts": "Reposts",
     "col_link_example": "Example",
     "folder_stat_period_title": "Periodic stats",
-    "folder_stat_period_hint": "Per-period totals from each channel's stored "
-                               "top posts. Name and Website are left blank — "
-                               "fill them in later.",
+    "folder_stat_period_hint": "Per-period views/shares/reactions/viral share "
+                               "and the featured post are computed from each "
+                               "channel's full post history (needs a refetch "
+                               "on older checkpoints). Name and Website are "
+                               "left blank — fill them in later.",
     "period_mode_month": "Monthly",
     "period_mode_season": "Seasonal",
     "col_channel_title": "Title",
@@ -271,9 +273,12 @@ RU = {
     "col_link_reposts": "Репосты",
     "col_link_example": "Пример",
     "folder_stat_period_title": "Статистика по периодам",
-    "folder_stat_period_hint": "Суммы по периодам из сохранённых топ-постов "
-                               "каждого канала. Колонки «Имя» и «Сайт» оставлены "
-                               "пустыми — заполните их позже.",
+    "folder_stat_period_hint": "Просмотры/репосты/реакции/доля виральных по "
+                               "периодам и показанный пост считаются по "
+                               "полной истории постов каждого канала (для "
+                               "старых checkpoint'ов нужен повторный сбор). "
+                               "Колонки «Имя» и «Сайт» оставлены пустыми — "
+                               "заполните их позже.",
     "period_mode_month": "По месяцам",
     "period_mode_season": "По сезонам",
     "col_channel_title": "Название",

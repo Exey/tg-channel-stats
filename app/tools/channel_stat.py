@@ -133,9 +133,49 @@ async def _channel_info(client, entity) -> dict:
     return info
 
 
-def _monthly_series(month_counts: dict[str, int]) -> list[dict]:
+def _monthly_aggregates(month_posts: list[dict], avg_views: float) -> dict[str, dict]:
+    """Per-month sums over *every* scanned post (not just the top-N pool), so
+    folder/period views reflect real totals instead of a sampled subset.
+
+    `month_posts` must be the per-post snapshots captured by `_account` at
+    merge time — not the final `rows` list, whose views/reactions/forwards
+    get bumped up afterwards by later album members via max(). Reading from
+    the mutated `rows` would make these sums inconsistent with `stats`
+    (avg_views etc.), which are accumulated from the same snapshots.
+    """
+    agg: dict[str, dict] = {}
+    for p in month_posts:
+        a = agg.setdefault(p["label"], {"views": 0, "shares": 0, "reactions": 0, "viral_count": 0})
+        a["views"] += p["views"]
+        a["shares"] += p["shares"]
+        a["reactions"] += p["reactions"]
+        if avg_views and p["views"] > 2 * avg_views:
+            a["viral_count"] += 1
+    return agg
+
+
+def _monthly_top_posts(rows: list[dict]) -> dict[str, dict]:
+    """For each month, the single highest-viewed merged post — computed over
+    *every* scanned post (final, post-album-merge state), not just the
+    top-N pool, so a period's "most viewed post" is always the real one
+    instead of only showing up when it happens to also be a global top-N
+    pick."""
+    top: dict[str, dict] = {}
+    for r in rows:
+        label = (r.get("date") or "")[:7]
+        if len(label) != 7:
+            continue
+        cur = top.get(label)
+        if cur is None or r["views"] > cur["views"]:
+            top[label] = r
+    return top
+
+
+def _monthly_series(month_counts: dict[str, int], month_agg: dict[str, dict],
+                    month_top: dict[str, dict]) -> list[dict]:
     """Fill gaps between the first and last month so the activity bars have no
-    holes; each item is {'label': 'YYYY-MM', 'count': n}."""
+    holes; each item is {'label': 'YYYY-MM', 'count', 'views', 'shares',
+    'reactions', 'viral_count', 'top'}."""
     if not month_counts:
         return []
     keys = sorted(month_counts)
@@ -145,7 +185,16 @@ def _monthly_series(month_counts: dict[str, int]) -> list[dict]:
     y, m = y0, m0
     while (y, m) <= (y1, m1):
         label = f"{y:04d}-{m:02d}"
-        series.append({"label": label, "count": int(month_counts.get(label, 0))})
+        a = month_agg.get(label, {})
+        series.append({
+            "label": label,
+            "count": int(month_counts.get(label, 0)),
+            "views": int(a.get("views", 0)),
+            "shares": int(a.get("shares", 0)),
+            "reactions": int(a.get("reactions", 0)),
+            "viral_count": int(a.get("viral_count", 0)),
+            "top": month_top.get(label),
+        })
         m += 1
         if m > 12:
             m, y = 1, y + 1
@@ -172,6 +221,8 @@ async def run_channel_stat(client, p: dict, ctx) -> str:
     scanned = 0
     current: dict | None = None   # album row currently being accumulated
     current_gid = None
+    current_anchor_msg = None     # first message of `current`'s group — its
+                                  # date/media type represent the merged post
     err_cutoff = datetime.now(timezone.utc) - timedelta(days=ERR_MIN_AGE_DAYS)
     last_full_year = datetime.now(timezone.utc).year - 1
 
@@ -192,11 +243,20 @@ async def run_channel_stat(client, p: dict, ctx) -> str:
     hour_dist = [0] * 24
     weekday_dist = [0] * 7
     month_counts: dict[str, int] = {}
+    month_posts: list[dict] = []  # per-post snapshot at merge time, for _monthly_aggregates
     first_ts: int | None = None
     last_ts: int | None = None
 
     def _account(row: dict, msg) -> None:
-        """Fold one *new* merged post into the activity stats."""
+        """Fold one *finalized* merged post into the activity stats.
+
+        Called once a post's album group is fully closed, so `row`'s
+        views/reactions/forwards are already the max() across every group
+        member. Calling this at group-*start* instead (before later album
+        members are merged in) undercounts reactions in particular: Telegram
+        often reports the real reaction count on only one message of a
+        media group, not the one iteration happens to visit first.
+        """
         nonlocal posts, sum_views, views_n, max_views, sum_reactions
         nonlocal sum_forwards, max_forwards, sum_views_settled, views_settled_n
         nonlocal sum_views_last_year, sum_forwards_last_year
@@ -227,8 +287,10 @@ async def run_channel_stat(client, p: dict, ctx) -> str:
         if d:
             hour_dist[d.hour] += 1
             weekday_dist[d.weekday()] += 1
-            month_counts[f"{d.year:04d}-{d.month:02d}"] = \
-                month_counts.get(f"{d.year:04d}-{d.month:02d}", 0) + 1
+            label = f"{d.year:04d}-{d.month:02d}"
+            month_counts[label] = month_counts.get(label, 0) + 1
+            month_posts.append({"label": label, "views": v,
+                                "shares": row["forwards"], "reactions": row["reactions"]})
             ts = int(d.timestamp())
             first_ts = ts if first_ts is None else min(first_ts, ts)
             last_ts = ts if last_ts is None else max(last_ts, ts)
@@ -260,6 +322,8 @@ async def run_channel_stat(client, p: dict, ctx) -> str:
                 current["text"] = text
                 current["full_text"] = full_text
         else:
+            if current is not None:
+                _account(current, current_anchor_msg)  # previous group is now closed
             current = {
                 "id": msg.id,
                 "ids": [msg.id],
@@ -273,12 +337,15 @@ async def run_channel_stat(client, p: dict, ctx) -> str:
                 "public": None,
             }
             current_gid = gid
+            current_anchor_msg = msg
             rows.append(current)
-            _account(current, msg)
 
         if scanned % HEARTBEAT_EVERY == 0:
             ctx.log(f"  scanned {scanned}/{total or '?'}…")
         ctx.progress(scanned, total)
+
+    if current is not None:
+        _account(current, current_anchor_msg)  # last group in the stream
 
     ctx.log(f"Read stats for {len(rows)} post(s) ({scanned} message(s) scanned).")
 
@@ -313,10 +380,12 @@ async def run_channel_stat(client, p: dict, ctx) -> str:
         "first_post_date": first_iso,
         "last_post_date": last_iso,
     }
+    month_agg = _monthly_aggregates(month_posts, avg_views_raw)
+    month_top = _monthly_top_posts(rows)
     distributions = {
         "hour": hour_dist,
         "weekday": weekday_dist,          # Mon..Sun
-        "monthly": _monthly_series(month_counts),
+        "monthly": _monthly_series(month_counts, month_agg, month_top),
     }
 
     # -------- engagement pool (union of top-N by each metric) --------

@@ -1,10 +1,15 @@
 """Folder Stat view: for one folder of channels, show reposts between them
 and per-period (monthly/seasonal) totals exportable as Markdown.
 
-Both tables are built from what's already in each channel's checkpoint (the
-stored top-N posts), not a fresh Telegram fetch — so this is only as complete
-as the top-N and "include public reposts" choices made when each channel in
-the folder was fetched.
+Both tables are built from what's already in each channel's checkpoint, not a
+fresh Telegram fetch. The links table relies on the checkpoint's stored top-N
+sample, so it's only as complete as the top-N and "include public reposts"
+choices made when the channel was fetched. Everything in the period table —
+views/shares/reactions/viral-share and the "most viewed post" — comes from
+`distributions.monthly`, which the fetcher fills from *every* scanned post,
+so it's accurate regardless of top-N, as long as the channel was fetched
+after that field was added (older checkpoints report zero/blank there until
+refetched).
 
 The month/season picker buttons are deliberately built from *every* tracked
 channel, not just the ones in the currently selected folder — so the grid of
@@ -49,16 +54,16 @@ def _parse_date(iso: str) -> datetime | None:
         return None
 
 
-def _period_key_label(dt: datetime, mode: str) -> tuple[tuple, str]:
+def _period_key_label(year: int, month: int, mode: str) -> tuple[tuple, str]:
     if mode == "season":
-        season = _SEASON_BY_MONTH[dt.month]
-        year = dt.year + 1 if dt.month == 12 else dt.year
+        season = _SEASON_BY_MONTH[month]
+        year = year + 1 if month == 12 else year
         if season == "Winter":
             label = f"Winter {year - 1}/{str(year)[2:]}"
         else:
             label = f"{season} {year}"
         return (year, _SEASON_ORDER[season]), label
-    return (dt.year, dt.month), f"{dt.year:04d}-{dt.month:02d}"
+    return (year, month), f"{year:04d}-{month:02d}"
 
 
 def _extract_ident(link: str) -> str:
@@ -341,55 +346,84 @@ class FolderStatView(QWidget):
 
     # ------------------------------------------------------------- periods
     def _collect_periods(self, mode: str) -> dict[tuple, dict]:
-        """Per-period totals for the *currently selected folder's* channels."""
+        """Per-period totals for the *currently selected folder's* channels.
+
+        Everything — views/shares/reactions/viral-share and the "most viewed
+        post" — comes from each checkpoint's `distributions.monthly`, which
+        the fetcher fills from *every* scanned post, not just the stored
+        top-N sample in `rows`. Checkpoints fetched before these fields
+        existed report zero/blank here until refetched.
+        """
         periods: dict[tuple, dict] = {}
         for ch in self._channels:
-            buckets: dict[tuple, list[dict]] = {}
-            for row in ch.get("rows", []) or []:
-                dt = _parse_date(row.get("date", ""))
-                if dt is None:
+            buckets: dict[tuple, dict] = {}
+            for m in ch.get("distributions", {}).get("monthly") or []:
+                count = int(m.get("count", 0) or 0)
+                if not count:
                     continue
-                key, label = _period_key_label(dt, mode)
-                buckets.setdefault(key, (label, []))[1].append(row)
-            for key, (label, rows) in buckets.items():
-                n = len(rows)
-                if not n:
+                try:
+                    year, month = (int(x) for x in m.get("label", "").split("-"))
+                except ValueError:
                     continue
-                views = sum(int(r.get("views", 0) or 0) for r in rows)
-                shares = sum(int(r.get("forwards", 0) or 0) for r in rows)
-                reactions = sum(int(r.get("reactions", 0) or 0) for r in rows)
-                avg_views = views / n
-                viral_count = (sum(1 for r in rows if int(r.get("views", 0) or 0) > 2 * avg_views)
-                              if avg_views else 0)
-                top_row = max(rows, key=lambda r: int(r.get("views", 0) or 0))
-                bucket = periods.setdefault(key, {"label": label, "entries": []})
+                key, label = _period_key_label(year, month, mode)
+                b = buckets.setdefault(key, {
+                    "label": label, "count": 0, "views": 0, "shares": 0,
+                    "reactions": 0, "viral_count": 0, "top_row": None,
+                })
+                b["count"] += count
+                b["views"] += int(m.get("views", 0) or 0)
+                b["shares"] += int(m.get("shares", 0) or 0)
+                b["reactions"] += int(m.get("reactions", 0) or 0)
+                b["viral_count"] += int(m.get("viral_count", 0) or 0)
+                top = m.get("top")
+                if top and (b["top_row"] is None
+                           or int(top.get("views", 0) or 0) > int(b["top_row"].get("views", 0) or 0)):
+                    b["top_row"] = top
+
+            for key, b in buckets.items():
+                bucket = periods.setdefault(key, {"label": b["label"], "entries": []})
                 bucket["entries"].append({
-                    "channel": ch, "views": views, "shares": shares,
-                    "reactions": reactions, "top_row": top_row,
-                    "viral_share": viral_count / n * 100,
+                    "channel": ch, "views": b["views"], "shares": b["shares"],
+                    "reactions": b["reactions"], "top_row": b["top_row"],
+                    "viral_share": b["viral_count"] / b["count"] * 100,
                 })
         for bucket in periods.values():
             self._score_entries(bucket["entries"])
         return periods
 
     @staticmethod
+    def _virality_component(viral_share: float) -> float:
+        """0-1 virality score from an *absolute* viral-share percentage (not
+        normalized against other channels): 0% -> 0, 1% -> 0.05, ramping up
+        to 1.0 at 15%+ viral share."""
+        if viral_share <= 0:
+            return 0.0
+        if viral_share >= 15:
+            return 1.0
+        if viral_share <= 1:
+            return 0.05 * viral_share
+        return 0.05 + (viral_share - 1) * (1.0 - 0.05) / (15 - 1)
+
+    @staticmethod
     def _score_entries(entries: list[dict]) -> None:
-        """Composite 0-1 rating per entry, min-max normalized against the
-        other channels in the same period bucket."""
+        """Composite 0-1 rating per entry: 20% engagement + 40% virality +
+        40% period views. Engagement and views are min-max normalized
+        against the other channels in the same period bucket; virality uses
+        an absolute viral-share curve (see `_virality_component`) so it
+        doesn't get diluted by how other channels in the folder performed.
+        """
         if not entries:
             return
-        viral_vals = [e["viral_share"] for e in entries]
         views_vals = [e["views"] for e in entries]
         eng_vals = [e["shares"] + e["reactions"] for e in entries]
-        v_min, v_max = min(viral_vals), max(viral_vals)
         vw_min, vw_max = min(views_vals), max(views_vals)
         eg_min, eg_max = min(eng_vals), max(eng_vals)
         for e in entries:
-            viral_norm = (e["viral_share"] - v_min) / (v_max - v_min) if v_max != v_min else 0
             views_norm = (e["views"] - vw_min) / (vw_max - vw_min) if vw_max != vw_min else 0
             eng = e["shares"] + e["reactions"]
             eng_norm = (eng - eg_min) / (eg_max - eg_min) if eg_max != eg_min else 0
-            e["score"] = 0.5 * viral_norm + 0.35 * views_norm + 0.15 * eng_norm
+            viral_score = FolderStatView._virality_component(e["viral_share"])
+            e["score"] = 0.20 * eng_norm + 0.40 * viral_score + 0.40 * views_norm
 
     def _collect_all_period_keys(self, mode: str) -> list[tuple[tuple, str]]:
         """Every period key/label across *all* tracked channels, regardless of
@@ -400,11 +434,14 @@ class FolderStatView(QWidget):
             data = self.channel_store.load(summary["key"])
             if not data:
                 continue
-            for row in data.get("rows", []) or []:
-                dt = _parse_date(row.get("date", ""))
-                if dt is None:
+            for m in data.get("distributions", {}).get("monthly") or []:
+                if not int(m.get("count", 0) or 0):
                     continue
-                key, label = _period_key_label(dt, mode)
+                try:
+                    year, month = (int(x) for x in m.get("label", "").split("-"))
+                except ValueError:
+                    continue
+                key, label = _period_key_label(year, month, mode)
                 keys[key] = label
         return sorted(keys.items(), key=lambda kv: kv[0], reverse=True)
 
@@ -558,14 +595,17 @@ class FolderStatView(QWidget):
             self.period_table.setItem(i, 4, QTableWidgetItem(fmt_int(entry["reactions"])))
 
             top_row = entry["top_row"]
-            snippet = (top_row.get("text") or f"#{top_row.get('id')}").strip()
-            if len(snippet) > 60:
-                snippet = snippet[:59] + "…"
-            link = build_post_link(ch.get("channel") or ch.get("username") or "",
-                                   top_row.get("id", 0))
-            post_item = QTableWidgetItem(snippet or f"#{top_row.get('id')}")
-            post_item.setToolTip(link)
-            post_item.setData(Qt.ItemDataRole.UserRole, link)
+            if top_row is None:
+                post_item = QTableWidgetItem("—")
+            else:
+                snippet = (top_row.get("text") or f"#{top_row.get('id')}").strip()
+                if len(snippet) > 60:
+                    snippet = snippet[:59] + "…"
+                link = build_post_link(ch.get("channel") or ch.get("username") or "",
+                                       top_row.get("id", 0))
+                post_item = QTableWidgetItem(snippet or f"#{top_row.get('id')}")
+                post_item.setToolTip(link)
+                post_item.setData(Qt.ItemDataRole.UserRole, link)
             self.period_table.setItem(i, 5, post_item)
 
             self.period_table.setItem(i, 6, QTableWidgetItem(f"{entry['viral_share']:.4f}%"))
@@ -600,14 +640,19 @@ class FolderStatView(QWidget):
             for entry in sorted(bucket["entries"], key=lambda e: e["viral_share"], reverse=True):
                 ch = entry["channel"]
                 top_row = entry["top_row"]
-                text = (top_row.get("full_text") or top_row.get("text")
-                       or f"#{top_row.get('id')}")
-                text = text.replace("|", "\\|").replace("\n", " ").strip() or f"#{top_row.get('id')}"
-                link = build_post_link(ch.get("channel") or ch.get("username") or "",
-                                       top_row.get("id", 0))
+                if top_row is None:
+                    post_md = "—"
+                else:
+                    text = (top_row.get("full_text") or top_row.get("text")
+                           or f"#{top_row.get('id')}")
+                    text = (text.replace("|", "\\|").replace("\n", " ").strip()
+                           or f"#{top_row.get('id')}")
+                    link = build_post_link(ch.get("channel") or ch.get("username") or "",
+                                           top_row.get("id", 0))
+                    post_md = f"[{text}]({link})"
                 lines.append(
                     f"| {_channel_uid(ch)} | {entry['views']} | {entry['shares']} | "
-                    f"{entry['reactions']} | [{text}]({link}) | {entry['viral_share']:.4f}% | "
+                    f"{entry['reactions']} | {post_md} | {entry['viral_share']:.4f}% | "
                     f"{entry['score']:.3f} |  |  |")
             lines.append("")
         return "\n".join(lines).rstrip("\n") + "\n"
