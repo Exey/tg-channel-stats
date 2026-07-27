@@ -8,6 +8,7 @@ set, kept intact.
 """
 from __future__ import annotations
 
+import re
 from datetime import datetime
 
 from PySide6.QtCore import Qt, QUrl
@@ -60,8 +61,17 @@ def short_num(n, decimals: int = 1) -> str:
 
 
 def build_post_link(channel_text: str, msg_id: int) -> str:
-    """t.me link from whatever channel identifier we have (@user or -100…)."""
-    v = str(channel_text).strip().lstrip("@")
+    """t.me link from whatever channel identifier we have (@user, -100…, or
+    a full t.me URL — the "channel" field is whatever was typed into the
+    fetch form, so it can be any of these; a raw URL passed through
+    unstripped used to produce a broken double-prefixed t.me/https://t.me/…
+    link)."""
+    v = str(channel_text).strip()
+    v = re.sub(r"^(https?://)?(www\.)?t\.me/", "", v, flags=re.IGNORECASE)
+    m = re.match(r"^c/(\d+)", v)
+    if m:
+        return f"https://t.me/c/{m.group(1)}/{msg_id}"
+    v = v.split("/")[0].split("?")[0].lstrip("@")
     if v.startswith("-100") and v[4:].isdigit():
         return f"https://t.me/c/{v[4:]}/{msg_id}"
     if v.lstrip("-").isdigit():

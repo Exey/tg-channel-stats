@@ -145,15 +145,18 @@ class FolderStatView(QWidget):
         self.empty_channels_lbl.setWordWrap(True)
         outer.addWidget(self.empty_channels_lbl)
 
-        scroll = QScrollArea()
-        scroll.setWidgetResizable(True)
-        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        # No outer QScrollArea: it would size `content` to its natural
+        # (unbounded) sizeHint and scroll the whole page, starving the
+        # period table of vertical space. Adding `content` straight to
+        # `outer` with stretch=1 instead makes it — and the period card's
+        # own stretch=1 inside it — actually fill the window; the links
+        # table stays capped (see _links_card) and the period table scrolls
+        # internally like any QTableWidget.
         self.content = QWidget()
         body = QVBoxLayout(self.content)
-        body.setContentsMargins(0, 6, 8, 0)
+        body.setContentsMargins(0, 6, 0, 0)
         body.setSpacing(20)
-        scroll.setWidget(self.content)
-        outer.addWidget(scroll, 1)
+        outer.addWidget(self.content, 1)
 
         body.addWidget(self._links_card())
         body.addWidget(self._period_card(), 1)
@@ -184,6 +187,7 @@ class FolderStatView(QWidget):
         self.links_table.horizontalHeader().setSectionResizeMode(
             1, QHeaderView.ResizeMode.Stretch)
         self.links_table.cellDoubleClicked.connect(self._open_link_example)
+        self.links_table.setMaximumHeight(220)   # keep the period table as the tall one
         card.body.addWidget(self.links_table)
         return card
 
@@ -391,6 +395,10 @@ class FolderStatView(QWidget):
             self._score_entries(bucket["entries"])
         return periods
 
+    _VIRALITY_WEIGHT_MIN = 0.20
+    _VIRALITY_WEIGHT_MAX = 0.51
+    _ENGAGEMENT_WEIGHT = 0.20
+
     @staticmethod
     def _virality_component(viral_share: float) -> float:
         """0-1 virality score from an *absolute* viral-share percentage (not
@@ -405,12 +413,29 @@ class FolderStatView(QWidget):
         return 0.05 + (viral_share - 1) * (1.0 - 0.05) / (15 - 1)
 
     @staticmethod
+    def _virality_weight(viral_share: float) -> float:
+        """How much of the rating virality can swing, itself scaled by how
+        viral the channel is: 20% at 0% viral share, ramping linearly to
+        51% at 15%+ viral share — so a highly viral channel isn't just
+        scored well on virality, virality also matters more to its rating."""
+        lo, hi = FolderStatView._VIRALITY_WEIGHT_MIN, FolderStatView._VIRALITY_WEIGHT_MAX
+        if viral_share <= 0:
+            return lo
+        if viral_share >= 15:
+            return hi
+        return lo + (viral_share / 15) * (hi - lo)
+
+    @staticmethod
     def _score_entries(entries: list[dict]) -> None:
-        """Composite 0-1 rating per entry: 20% engagement + 40% virality +
-        40% period views. Engagement and views are min-max normalized
-        against the other channels in the same period bucket; virality uses
-        an absolute viral-share curve (see `_virality_component`) so it
-        doesn't get diluted by how other channels in the folder performed.
+        """Composite 0-1 rating per entry: a fixed 20% engagement, a
+        virality weight that itself ramps from 20% to 51% with viral share
+        (see `_virality_weight`) applied to the virality score (see
+        `_virality_component`), and period views taking whatever weight is
+        left (80% - virality weight) — so views weight shrinks as virality
+        weight grows. Engagement and views are min-max normalized against
+        the other channels in the same period bucket; virality uses an
+        absolute viral-share curve so it doesn't get diluted by how other
+        channels in the folder performed.
         """
         if not entries:
             return
@@ -423,7 +448,11 @@ class FolderStatView(QWidget):
             eng = e["shares"] + e["reactions"]
             eng_norm = (eng - eg_min) / (eg_max - eg_min) if eg_max != eg_min else 0
             viral_score = FolderStatView._virality_component(e["viral_share"])
-            e["score"] = 0.20 * eng_norm + 0.40 * viral_score + 0.40 * views_norm
+            virality_weight = FolderStatView._virality_weight(e["viral_share"])
+            views_weight = (1.0 - FolderStatView._ENGAGEMENT_WEIGHT) - virality_weight
+            e["score"] = (FolderStatView._ENGAGEMENT_WEIGHT * eng_norm
+                         + virality_weight * viral_score
+                         + views_weight * views_norm)
 
     def _collect_all_period_keys(self, mode: str) -> list[tuple[tuple, str]]:
         """Every period key/label across *all* tracked channels, regardless of
