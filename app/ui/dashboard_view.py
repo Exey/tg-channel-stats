@@ -28,6 +28,15 @@ from .widgets import Card, ChartCard, SectionCard, StatCard, hline
 MONTHS_SHORT = ["", "Jan", "Feb", "Mar", "Apr", "May", "Jun",
                 "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
 
+LAST_FULL_YEAR = datetime.now().year - 1
+
+# card key -> i18n key for an explanatory tooltip (same cards/logic as compare mode).
+_CARD_TOOLTIPS = {
+    "erv_pct": "cmp_erv_pct_tip",
+    "virality_index": "cmp_virality_index_tip",
+    "viral_post_share": "cmp_viral_share_tip",
+}
+
 
 def fmt_int(n) -> str:
     try:
@@ -144,6 +153,14 @@ class DashboardView(QWidget):
     def tr_(self, key: str, **kw) -> str:
         return self.i18n.tr(key, **kw)
 
+    def _metric_title(self, key: str, title_key: str) -> str:
+        title = self.tr_(title_key)
+        if key == "err_pct":
+            title = f"{title} ({self.tr_('stat_err_pct_sub')})"
+        elif key == "views_last_year":
+            title = self.tr_(title_key, year=LAST_FULL_YEAR)
+        return title
+
     # --------------------------------------------------------------- build
     def _build_ui(self) -> None:
         outer = QVBoxLayout(self)
@@ -207,10 +224,17 @@ class DashboardView(QWidget):
             ("avg_reactions", "stat_avg_reactions"),
             ("avg_reposts", "stat_avg_reposts"),
             ("max_reposts", "stat_max_reposts"),
+            ("err_pct", "stat_err_pct"),
+            ("views_last_year", "cmp_view_repost_year"),
+            ("erv_pct", "cmp_erv_pct"),
+            ("virality_index", "cmp_virality_index"),
+            ("viral_post_share", "cmp_viral_share"),
         ]
         for i, (key, title_key) in enumerate(specs):
             accent = COLORS["accent"] if key != "total_posts" else COLORS["activity"]
-            card = StatCard(self.tr_(title_key), accent=accent)
+            card = StatCard(self._metric_title(key, title_key), accent=accent)
+            if key in _CARD_TOOLTIPS:
+                card.setToolTip(self.tr_(_CARD_TOOLTIPS[key]))
             self._cards[key] = card
             grid.addWidget(card, i // 4, i % 4)
         for col in range(4):
@@ -218,7 +242,7 @@ class DashboardView(QWidget):
         self.body.addLayout(grid)
 
     def _build_charts(self) -> None:
-        self.activity_chart = BarChart(accent=COLORS["activity"])
+        self.activity_chart = BarChart(accent=COLORS["activity"], max_labels=999)
         self.activity_card = ChartCard(self.tr_("chart_activity"), self.activity_chart)
         self.activity_card.setMinimumHeight(300)
         self.body.addWidget(self.activity_card)
@@ -300,6 +324,29 @@ class DashboardView(QWidget):
         self._cards["avg_reactions"].set_value(fmt_int(round(stats.get("avg_reactions", 0))))
         self._cards["avg_reposts"].set_value(fmt_int(round(stats.get("avg_reposts", 0))))
         self._cards["max_reposts"].set_value(fmt_int(stats.get("max_reposts", 0)))
+
+        # Same metrics/formulas as compare mode.
+        members = info.get("members", 0) or 0
+        avg_views = stats.get("avg_views", 0) or 0
+        avg_reactions = stats.get("avg_reactions", 0) or 0
+        avg_reposts = stats.get("avg_reposts", 0) or 0
+        max_views = stats.get("max_views", 0) or 0
+        views_ly = stats.get("last_year_views", 0) or 0
+        # Older checkpoints predate this stat entirely (None) — fall back to
+        # the overall average rather than showing a false 0%.
+        avg_views_settled = stats.get("avg_views_settled")
+        if avg_views_settled is None:
+            avg_views_settled = avg_views
+        err_pct = (avg_views_settled / members * 100) if members else 0
+        erv_pct = ((avg_reactions + avg_reposts) / avg_views * 100) if avg_views else 0
+        virality_index = (max_views / avg_views) if avg_views else 0
+        viral_post_share = stats.get("viral_post_share", 0) or 0
+
+        self._cards["err_pct"].set_value(f"{err_pct:.1f}%")
+        self._cards["views_last_year"].set_value(short_num(views_ly, 2) if views_ly else "—")
+        self._cards["erv_pct"].set_value(f"{erv_pct:.1f}%")
+        self._cards["virality_index"].set_value(f"{virality_index:.2f}×")
+        self._cards["viral_post_share"].set_value(f"{viral_post_share:.1f}%")
 
     # ------------------------------------------------------ period wording
     def _unit_word(self, n: int, unit: str) -> str:
@@ -579,11 +626,17 @@ class DashboardView(QWidget):
         keymap = {"members": "stat_members", "avg_views": "stat_avg_views",
                   "max_views": "stat_max_views", "posts_per_day": "stat_posts_per_day",
                   "avg_reactions": "stat_avg_reactions", "avg_reposts": "stat_avg_reposts",
-                  "max_reposts": "stat_max_reposts"}
+                  "max_reposts": "stat_max_reposts", "erv_pct": "cmp_erv_pct",
+                  "virality_index": "cmp_virality_index", "viral_post_share": "cmp_viral_share"}
         for k, key in keymap.items():
             self._cards[k].title_lbl.setText(self.tr_(key))
         self._cards["total_posts"].title_lbl.setText(
             self.tr_("stat_total_posts_period",
                      period=self._period_text() if self._data else ""))
+        self._cards["err_pct"].title_lbl.setText(self._metric_title("err_pct", "stat_err_pct"))
+        self._cards["views_last_year"].title_lbl.setText(
+            self._metric_title("views_last_year", "cmp_view_repost_year"))
+        for key, tip_key in _CARD_TOOLTIPS.items():
+            self._cards[key].setToolTip(self.tr_(tip_key))
         if self._data:
             self.sub_lbl.setText(self._header_sub())

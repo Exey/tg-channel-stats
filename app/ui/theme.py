@@ -78,6 +78,16 @@ DARK = {
     "shadow": (0, 0, 0),
 }
 
+# Fixed 16-swatch palette offered when picking a folder color. Same set in
+# both themes — these are saturated enough to read on light or dark card
+# backgrounds.
+FOLDER_COLORS = [
+    "#EF4444", "#F97316", "#F59E0B", "#EAB308",
+    "#84CC16", "#22C55E", "#10B981", "#14B8A6",
+    "#06B6D4", "#0EA5E9", "#3B82F6", "#6366F1",
+    "#8B5CF6", "#A855F7", "#D946EF", "#EC4899",
+]
+
 # The currently active palette, mutated in place by set_theme() — see the
 # module docstring for why this stays one dict object rather than a rebound
 # name.

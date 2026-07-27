@@ -160,6 +160,11 @@ class NavButton(QPushButton):
         self._icon.setFixedSize(22, 22)
         self._icon.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
         lay.addWidget(self._icon)
+        self._dot = QLabel()
+        self._dot.setFixedSize(8, 8)
+        self._dot.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
+        self._dot.setVisible(False)
+        lay.addWidget(self._dot)
         self._label = QLabel(text)
         self._label.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
         lay.addWidget(self._label, 1)
@@ -182,6 +187,11 @@ class NavButton(QPushButton):
 
     def set_meta(self, text: str) -> None:
         self._meta.setText(text)
+
+    def set_folder_color(self, color: str | None) -> None:
+        if color:
+            self._dot.setStyleSheet(f"background:{color}; border-radius:4px;")
+        self._dot.setVisible(bool(color))
 
 
 def hline() -> QFrame:

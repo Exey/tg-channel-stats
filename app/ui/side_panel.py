@@ -8,15 +8,30 @@ analytics_dashboard nav).
 from __future__ import annotations
 
 from PySide6.QtCore import Qt, Signal
+from PySide6.QtGui import QColor, QIcon, QPainter, QPixmap
 from PySide6.QtWidgets import (
-    QButtonGroup, QFrame, QHBoxLayout, QLabel, QPushButton, QScrollArea,
-    QVBoxLayout, QWidget,
+    QButtonGroup, QFrame, QHBoxLayout, QLabel, QMenu, QPushButton,
+    QScrollArea, QVBoxLayout, QWidget,
 )
 
+from ..folders import FolderStore
 from .compare_view import MAX_COMPARE
 from .dashboard_view import short_num
+from .folder_dialog import FolderManagerDialog
 from .theme import COLORS
 from .widgets import NavButton, hline
+
+
+def _folder_icon(color: str) -> QIcon:
+    pixmap = QPixmap(14, 14)
+    pixmap.fill(Qt.GlobalColor.transparent)
+    painter = QPainter(pixmap)
+    painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+    painter.setBrush(QColor(color))
+    painter.setPen(Qt.PenStyle.NoPen)
+    painter.drawEllipse(1, 1, 12, 12)
+    painter.end()
+    return QIcon(pixmap)
 
 
 class SidePanel(QFrame):
@@ -35,6 +50,7 @@ class SidePanel(QFrame):
         self.setFixedWidth(256)
         self.compare_mode = False
         self._compare_keys: list[str] = []
+        self.folder_store = FolderStore()
 
         root = QVBoxLayout(self)
         root.setContentsMargins(16, 22, 16, 18)
@@ -119,6 +135,13 @@ class SidePanel(QFrame):
 
         channels = sorted(channels, key=lambda c: c.get("members", 0) or 0, reverse=True)
 
+        # Drop folder assignments for channels that no longer exist (removed
+        # from the sidebar) so folders.json doesn't accumulate dead keys.
+        live_keys = {ch["key"] for ch in channels}
+        stale = [k for k in self.folder_store.assignments if k not in live_keys]
+        for k in stale:
+            self.folder_store.set_channel_folder(k, None)
+
         self._compare_keys.clear()
         for ch in channels:
             btn = NavButton("reports", ch.get("title") or ch.get("key", "?"))
@@ -127,11 +150,56 @@ class SidePanel(QFrame):
             btn.set_meta(short_num(members, 1) if members else "")
             key = ch["key"]
             btn.clicked.connect(lambda _=False, k=key: self._on_channel_clicked(k))
+            btn.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+            btn.customContextMenuRequested.connect(
+                lambda pos, k=key, b=btn: self._show_channel_menu(k, b, pos))
             self.group.addButton(btn)
             # insert above the stretch (last item)
             self.list_lay.insertWidget(self.list_lay.count() - 1, btn)
             self._channel_btns[key] = btn
         self.group.setExclusive(not self.compare_mode)
+        self._refresh_folder_dots()
+
+    # -------------------------------------------------------------- folders
+    def _refresh_folder_dots(self) -> None:
+        for key, btn in self._channel_btns.items():
+            folder_id = self.folder_store.folder_for_channel(key)
+            folder = self.folder_store.get_folder(folder_id) if folder_id else None
+            btn.set_folder_color(folder["color"] if folder else None)
+
+    def _show_channel_menu(self, key: str, btn: NavButton, pos) -> None:
+        menu = QMenu(self)
+        current = self.folder_store.folder_for_channel(key)
+
+        none_act = menu.addAction(self.i18n.tr("folder_none"))
+        none_act.setCheckable(True)
+        none_act.setChecked(current is None)
+        none_act.triggered.connect(lambda: self._assign_folder(key, None))
+
+        folders = self.folder_store.list_folders()
+        if folders:
+            menu.addSeparator()
+            for folder in folders:
+                act = menu.addAction(_folder_icon(folder["color"]), folder["name"])
+                act.setCheckable(True)
+                act.setChecked(folder["id"] == current)
+                act.triggered.connect(
+                    lambda _=False, fid=folder["id"]: self._assign_folder(key, fid))
+
+        menu.addSeparator()
+        manage_act = menu.addAction(self.i18n.tr("folder_manage"))
+        manage_act.triggered.connect(self._open_folder_manager)
+
+        menu.exec(btn.mapToGlobal(pos))
+
+    def _assign_folder(self, key: str, folder_id: str | None) -> None:
+        self.folder_store.set_channel_folder(key, folder_id)
+        self._refresh_folder_dots()
+
+    def _open_folder_manager(self) -> None:
+        dlg = FolderManagerDialog(self.folder_store, self.i18n, self)
+        dlg.exec()
+        self._refresh_folder_dots()
 
     # ------------------------------------------------------------- compare
     def _toggle_compare_mode(self, on: bool) -> None:
