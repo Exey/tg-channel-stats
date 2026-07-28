@@ -24,6 +24,7 @@ EN = {
     "folder_name_prompt": "Folder name:",
     "folder_close": "Close",
     "folder_pick_color": "Pick a color",
+    "folder_change_color": "Change color",
     "folder_delete": "Delete folder",
     "folder_delete_confirm": "Delete folder “{name}”? Channels in it keep their "
                              "data — only the folder assignment is removed.",
@@ -257,6 +258,7 @@ RU = {
     "folder_name_prompt": "Название папки:",
     "folder_close": "Закрыть",
     "folder_pick_color": "Выбор цвета",
+    "folder_change_color": "Изменить цвет",
     "folder_delete": "Удалить папку",
     "folder_delete_confirm": "Удалить папку «{name}»? Каналы в ней сохранятся — "
                              "будет удалена только привязка к папке.",

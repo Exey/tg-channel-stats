@@ -77,20 +77,30 @@ class FolderManagerDialog(QDialog):
             swatch = QPushButton()
             swatch.setFixedSize(20, 20)
             swatch.setCursor(Qt.CursorShape.PointingHandCursor)
+            swatch.setToolTip(self.i18n.tr("folder_change_color"))
             swatch.setStyleSheet(
                 f"background:{folder['color']}; border-radius:10px; border:none;")
             swatch.clicked.connect(
                 lambda _=False, fid=folder["id"], btn=swatch: self._pick_color(fid, btn))
             h.addWidget(swatch)
 
+            color_btn = QPushButton("  🎨  ")
+            color_btn.setObjectName("ghost")
+            color_btn.setFixedWidth(48)
+            color_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+            color_btn.setToolTip(self.i18n.tr("folder_change_color"))
+            color_btn.clicked.connect(
+                lambda _=False, fid=folder["id"], btn=swatch: self._pick_color(fid, btn))
+            h.addWidget(color_btn)
+
             name_edit = QLineEdit(folder["name"])
             name_edit.editingFinished.connect(
                 lambda fid=folder["id"], edit=name_edit: self._rename(fid, edit))
             h.addWidget(name_edit, 1)
 
-            del_btn = QPushButton("🗑")
+            del_btn = QPushButton("  🗑  ")
             del_btn.setObjectName("ghost")
-            del_btn.setFixedWidth(32)
+            del_btn.setFixedWidth(48)
             del_btn.clicked.connect(lambda _=False, fid=folder["id"]: self._delete(fid))
             h.addWidget(del_btn)
 
