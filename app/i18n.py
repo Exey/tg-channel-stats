@@ -64,6 +64,13 @@ EN = {
     "col_name": "Name",
     "col_website": "Website",
     "folder_stat_period_empty": "No posts found for this folder.",
+    # compare charts view
+    "nav_compare_charts": "📈 Compare Charts",
+    "nav_compare_charts_hint": "Pick up to 8 channels to compare on charts.",
+    "compare_charts_sub": "Views, shares and reactions over time for the "
+                          "channels selected in the sidebar",
+    "compare_charts_empty": "Pick up to 8 channels from the sidebar to plot "
+                            "them here.",
     # menus
     "menu_file": "File",
     "menu_language": "Language",
@@ -190,6 +197,7 @@ EN = {
     "cmp_viral_share_tip": "The percentage of posts that received more than "
                            "2× the average number of views.",
     # charts
+    "chart_trend_title": "Views / Reactions / Shares over time",
     "chart_activity": "Month activity",
     "chart_by_hour": "Posts by hour of day",
     "chart_by_weekday": "Posts by day of week",
@@ -290,6 +298,13 @@ RU = {
     "col_name": "Имя",
     "col_website": "Сайт",
     "folder_stat_period_empty": "Постов в этой папке не найдено.",
+    # compare charts view
+    "nav_compare_charts": "📈 Сравнить на графиках",
+    "nav_compare_charts_hint": "Выберите до 8 каналов для сравнения на графиках.",
+    "compare_charts_sub": "Просмотры, репосты и реакции по времени для "
+                          "каналов, выбранных в боковой панели",
+    "compare_charts_empty": "Выберите до 8 каналов в боковой панели, чтобы "
+                            "построить графики.",
     "menu_file": "Файл",
     "menu_language": "Язык",
     "menu_theme": "Тема",
@@ -407,6 +422,7 @@ RU = {
     "cmp_viral_share": "Доля вирусных постов",
     "cmp_viral_share_tip": "Процент постов, набравших более чем в 2 раза "
                            "больше среднего числа просмотров.",
+    "chart_trend_title": "Просмотры / Реакции / Репосты по времени",
     "chart_activity": "Активность по месяцам",
     "chart_by_hour": "Посты по часам суток",
     "chart_by_weekday": "Посты по дням недели",

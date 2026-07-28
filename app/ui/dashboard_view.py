@@ -14,16 +14,17 @@ from datetime import datetime
 from PySide6.QtCore import Qt, QUrl
 from PySide6.QtGui import QDesktopServices, QIcon
 from PySide6.QtWidgets import (
-    QAbstractItemView, QApplication, QDialog, QDialogButtonBox, QFileDialog,
-    QGridLayout, QHBoxLayout, QHeaderView, QLabel, QMenu, QMessageBox,
-    QPlainTextEdit, QPushButton, QScrollArea, QTableWidget, QTableWidgetItem,
-    QVBoxLayout, QWidget,
+    QAbstractItemView, QApplication, QButtonGroup, QDialog, QDialogButtonBox,
+    QFileDialog, QGridLayout, QHBoxLayout, QHeaderView, QLabel, QMenu,
+    QMessageBox, QPlainTextEdit, QPushButton, QScrollArea, QTableWidget,
+    QTableWidgetItem, QVBoxLayout, QWidget,
 )
 
 from PySide6.QtCore import Signal
 
 from ..folders import FolderStore
-from .charts import BarChart
+from ..periods import period_key_label
+from .charts import BarChart, MultiLineChart
 from .folder_dialog import FolderManagerDialog
 from .theme import COLORS
 from .widgets import Card, ChartCard, SectionCard, StatCard, folder_icon, hline
@@ -162,6 +163,7 @@ class DashboardView(QWidget):
         self._title = ""
         self._sort_col = 2
         self._sort_desc = True
+        self._trend_mode = "month"
         self._build_ui()
 
     def tr_(self, key: str, **kw) -> str:
@@ -227,6 +229,7 @@ class DashboardView(QWidget):
 
         self._build_stat_cards()
         self._build_top_viral_table()
+        self._build_trend_chart()
         self._build_charts()
         self._build_table()
 
@@ -277,6 +280,70 @@ class DashboardView(QWidget):
         self.top_viral_card.body.addWidget(self.top_viral_table)
         self.body.addWidget(self.top_viral_card)
 
+    def _build_trend_chart(self) -> None:
+        self.trend_card = SectionCard(self.tr_("chart_trend_title"))
+
+        self.trend_mode_season_btn = QPushButton(self.tr_("period_mode_season"))
+        self.trend_mode_season_btn.setObjectName("ghost")
+        self.trend_mode_season_btn.setCheckable(True)
+        self.trend_mode_month_btn = QPushButton(self.tr_("period_mode_month"))
+        self.trend_mode_month_btn.setObjectName("ghost")
+        self.trend_mode_month_btn.setCheckable(True)
+        self._trend_mode_group = QButtonGroup(self)
+        self._trend_mode_group.setExclusive(True)
+        self._trend_mode_group.addButton(self.trend_mode_season_btn)
+        self._trend_mode_group.addButton(self.trend_mode_month_btn)
+
+        mode_row = QHBoxLayout()
+        mode_row.addWidget(self.trend_mode_season_btn)
+        mode_row.addWidget(self.trend_mode_month_btn)
+        mode_row.addStretch()
+
+        # Series toggle chips — checkable, colored by series, independent of
+        # each other (not a QButtonGroup: any combination can be on). Only
+        # Views is on by default since it dwarfs the other two and is what
+        # most people want to see first.
+        legend_row = QHBoxLayout()
+        legend_row.setSpacing(10)
+        self._trend_series_visible = {"views": True, "reactions": False, "shares": False}
+        self._trend_series_btns: dict[str, QPushButton] = {}
+        for key, title_key, color_key in (("views", "col_views", "accent"),
+                                          ("reactions", "col_reactions", "weekday"),
+                                          ("shares", "col_shares", "warn")):
+            btn = QPushButton(f"● {self.tr_(title_key)}")
+            btn.setObjectName("ghost")
+            btn.setCheckable(True)
+            btn.setCursor(Qt.CursorShape.PointingHandCursor)
+            color = COLORS[color_key]
+            btn.setStyleSheet(
+                f"QPushButton#ghost {{ color: {COLORS['faint']}; }}"
+                f"QPushButton#ghost:checked {{ color: {color}; background: transparent; "
+                f"font-weight: 600; }}"
+                f"QPushButton#ghost:hover {{ color: {color}; }}")
+            btn.setChecked(self._trend_series_visible[key])
+            btn.toggled.connect(lambda checked, k=key: self._on_trend_series_toggled(k, checked))
+            legend_row.addWidget(btn)
+            self._trend_series_btns[key] = btn
+        legend_row.addStretch()
+
+        self.trend_chart = MultiLineChart()
+        self.trend_card.body.addLayout(mode_row)
+        self.trend_card.body.addLayout(legend_row)
+        self.trend_card.body.addWidget(self.trend_chart, 1)
+        # Generous floor: title + mode row + legend row + the chart's own
+        # minimum (260) + card margins/spacing — too little here silently
+        # squeezes the chart below what it needs to fit its x-axis labels.
+        self.trend_card.setMinimumHeight(420)
+        self.body.addWidget(self.trend_card)
+
+        # Widgets above exist now, so it's safe to wire signals and set the
+        # default mode (which fires the toggle once).
+        self.trend_mode_season_btn.toggled.connect(
+            lambda checked: self._on_trend_mode_toggled("season", checked))
+        self.trend_mode_month_btn.toggled.connect(
+            lambda checked: self._on_trend_mode_toggled("month", checked))
+        self.trend_mode_month_btn.setChecked(True)
+
     def _build_charts(self) -> None:
         self.activity_chart = BarChart(accent=COLORS["activity"], max_labels=999)
         self.activity_card = ChartCard(self.tr_("chart_activity"), self.activity_chart)
@@ -324,6 +391,7 @@ class DashboardView(QWidget):
 
         self._fill_cards()
         self._fill_charts()
+        self._rebuild_trend_chart()
         self._rebuild_table()
         self._rebuild_top_viral_table()
         self.refresh_folder_button()
@@ -504,6 +572,65 @@ class DashboardView(QWidget):
         try:
             y, m = iso_month.split("-")
             return MONTHS_SHORT[int(m)]
+        except (ValueError, IndexError):
+            return iso_month
+
+    # ------------------------------------------------------- trend chart
+    def _on_trend_mode_toggled(self, mode: str, checked: bool) -> None:
+        if not checked:
+            return
+        self._trend_mode = mode
+        self._rebuild_trend_chart()
+
+    def _on_trend_series_toggled(self, key: str, checked: bool) -> None:
+        self._trend_series_visible[key] = checked
+        self._rebuild_trend_chart()
+
+    def _rebuild_trend_chart(self) -> None:
+        monthly = self._data.get("distributions", {}).get("monthly") or []
+        if self._trend_mode == "season":
+            labels, views, reactions, shares = self._trend_season_series(monthly)
+        else:
+            labels = [self._month_label_full(m.get("label", "")) for m in monthly]
+            views = [int(m.get("views", 0) or 0) for m in monthly]
+            reactions = [int(m.get("reactions", 0) or 0) for m in monthly]
+            shares = [int(m.get("shares", 0) or 0) for m in monthly]
+        all_series = {
+            "views": {"label": self.tr_("col_views"), "color": COLORS["accent"], "values": views},
+            "reactions": {"label": self.tr_("col_reactions"), "color": COLORS["weekday"],
+                         "values": reactions},
+            "shares": {"label": self.tr_("col_shares"), "color": COLORS["warn"], "values": shares},
+        }
+        series = [s for key, s in all_series.items() if self._trend_series_visible.get(key)]
+        self.trend_chart.set_data(series, labels, empty_text=self.tr_("chart_empty"))
+
+    @staticmethod
+    def _trend_season_series(monthly: list[dict]) -> tuple[list[str], list[int], list[int], list[int]]:
+        """Sum each season's 3 months together — same season grouping the
+        Folder Stats view uses (see app.periods)."""
+        buckets: dict[tuple, dict] = {}
+        for m in monthly:
+            try:
+                year, month = (int(x) for x in m.get("label", "").split("-"))
+            except ValueError:
+                continue
+            key, label = period_key_label(year, month, "season")
+            b = buckets.setdefault(key, {"label": label, "views": 0, "reactions": 0, "shares": 0})
+            b["views"] += int(m.get("views", 0) or 0)
+            b["reactions"] += int(m.get("reactions", 0) or 0)
+            b["shares"] += int(m.get("shares", 0) or 0)
+        keys = sorted(buckets)
+        return ([buckets[k]["label"] for k in keys], [buckets[k]["views"] for k in keys],
+               [buckets[k]["reactions"] for k in keys], [buckets[k]["shares"] for k in keys])
+
+    @staticmethod
+    def _month_label_full(iso_month: str) -> str:
+        """Unlike `_month_label` (bar chart, one year's worth of bars at
+        most), the trend chart can span years, so a bare "Jul" would be
+        ambiguous — tag the year on."""
+        try:
+            y, m = iso_month.split("-")
+            return f"{MONTHS_SHORT[int(m)]} '{y[2:]}"
         except (ValueError, IndexError):
             return iso_month
 
@@ -746,6 +873,12 @@ class DashboardView(QWidget):
         self.md_btn.setText(self.tr_("save_md_button"))
         self.refetch_btn.setText(self.tr_("dash_refresh"))
         self.remove_btn.setText(self.tr_("dash_remove"))
+        self.trend_card.title_lbl.setText(self.tr_("chart_trend_title"))
+        self.trend_mode_season_btn.setText(self.tr_("period_mode_season"))
+        self.trend_mode_month_btn.setText(self.tr_("period_mode_month"))
+        for key, title_key in (("views", "col_views"), ("reactions", "col_reactions"),
+                               ("shares", "col_shares")):
+            self._trend_series_btns[key].setText(f"● {self.tr_(title_key)}")
         self.activity_card.set_title(self.tr_("chart_activity"))
         self.hour_card.set_title(self.tr_("chart_by_hour"))
         self.weekday_card.set_title(self.tr_("chart_by_weekday"))

@@ -13,6 +13,7 @@ from ..config import Config, config_dir
 from ..folders import FolderStore
 from ..i18n import I18n
 from ..store import ChannelStore
+from .compare_charts_view import CompareChartsView
 from .compare_view import CompareView
 from .config_view import ConfigView
 from .dashboard_view import DashboardView
@@ -57,6 +58,8 @@ class MainWindow(QMainWindow):
         self.side.channel_selected.connect(self._show_channel)
         self.side.compare_requested.connect(self._show_compare)
         self.side.compare_mode_off.connect(self._on_compare_mode_off)
+        self.side.compare_charts_selected.connect(self._show_compare_charts)
+        self.side.compare_charts_mode_off.connect(self._on_compare_charts_mode_off)
         self.side.fold_requested.connect(self._fold_sidebar)
         self.side.language_toggle_requested.connect(self._toggle_language)
         self.side.compare_md_requested.connect(lambda: self.compare.save_markdown())
@@ -90,10 +93,12 @@ class MainWindow(QMainWindow):
         self.dashboard.folders_changed.connect(self._on_folders_changed)
         self.compare = CompareView(self.i18n)
         self.folder_stat = FolderStatView(self.i18n, self.folder_store, self.store)
-        self.stack.addWidget(self.config_view)   # index 0
-        self.stack.addWidget(self.dashboard)     # index 1
-        self.stack.addWidget(self.compare)       # index 2
-        self.stack.addWidget(self.folder_stat)   # index 3
+        self.compare_charts = CompareChartsView(self.i18n)
+        self.stack.addWidget(self.config_view)     # index 0
+        self.stack.addWidget(self.dashboard)       # index 1
+        self.stack.addWidget(self.compare)         # index 2
+        self.stack.addWidget(self.folder_stat)     # index 3
+        self.stack.addWidget(self.compare_charts)  # index 4
         content_col.addWidget(self.stack, 1)
 
         content_wrap = QWidget()
@@ -219,6 +224,21 @@ class MainWindow(QMainWindow):
         else:
             self._show_config()
 
+    def _show_compare_charts(self, keys: list[str]) -> None:
+        # Live-updates as the sidebar selection changes (0-8 keys, unlike
+        # Compare's 2-8) — see SidePanel.compare_charts_selected. Also an
+        # overlay: _current_key is left alone so turning the mode back off
+        # (see _on_compare_charts_mode_off) returns to whatever was open.
+        datas = [d for d in (self.store.load(k) for k in keys) if d]
+        self.compare_charts.load(datas)
+        self.stack.setCurrentWidget(self.compare_charts)
+
+    def _on_compare_charts_mode_off(self) -> None:
+        if self._current_key and self.side.has_channel(self._current_key):
+            self._show_channel(self._current_key)
+        else:
+            self._show_config()
+
     def _on_channel_fetched(self, payload: dict) -> None:
         key = self.store.save(payload)
         self._refresh_sidebar()
@@ -259,6 +279,7 @@ class MainWindow(QMainWindow):
         self.config_view.retranslate()
         self.compare.retranslate()
         self.folder_stat.retranslate()
+        self.compare_charts.retranslate()
         self.unfold_btn.setToolTip(self.i18n.tr("nav_unfold_hint"))
 
     # --------------------------------------------------------------- theme

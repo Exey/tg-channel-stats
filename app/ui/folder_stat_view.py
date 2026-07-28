@@ -30,17 +30,11 @@ from PySide6.QtWidgets import (
 )
 
 from ..folders import FolderStore
+from ..periods import period_key_label as _period_key_label
 from ..store import ChannelStore
 from .dashboard_view import build_post_link, fmt_int
 from .widgets import SectionCard, hline
 
-_SEASON_BY_MONTH = {
-    12: "Winter", 1: "Winter", 2: "Winter",
-    3: "Spring", 4: "Spring", 5: "Spring",
-    6: "Summer", 7: "Summer", 8: "Summer",
-    9: "Fall", 10: "Fall", 11: "Fall",
-}
-_SEASON_ORDER = {"Winter": 0, "Spring": 1, "Summer": 2, "Fall": 3}
 MONTHS_FULL = ["", "January", "February", "March", "April", "May", "June",
                "July", "August", "September", "October", "November", "December"]
 
@@ -52,18 +46,6 @@ def _parse_date(iso: str) -> datetime | None:
         return datetime.fromisoformat(iso.replace("Z", "+00:00")).astimezone()
     except ValueError:
         return None
-
-
-def _period_key_label(year: int, month: int, mode: str) -> tuple[tuple, str]:
-    if mode == "season":
-        season = _SEASON_BY_MONTH[month]
-        year = year + 1 if month == 12 else year
-        if season == "Winter":
-            label = f"Winter {year - 1}/{str(year)[2:]}"
-        else:
-            label = f"{season} {year}"
-        return (year, _SEASON_ORDER[season]), label
-    return (year, month), f"{year:04d}-{month:02d}"
 
 
 def _extract_ident(link: str) -> str:

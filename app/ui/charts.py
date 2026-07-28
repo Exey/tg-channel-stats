@@ -233,3 +233,196 @@ class Sparkline(QWidget):
         p.setPen(pen)
         p.drawPath(line)
         p.end()
+
+
+class MultiLineChart(QWidget):
+    """Several count-valued trend lines over one shared x-axis, e.g.
+    views/reactions/shares over time.
+
+    Two scaling modes, since "fair" means different things depending on
+    what the series represent:
+
+    * shared_scale=True — one y-axis (with real numeric gridlines) for every
+      series. Use this when the series are the *same metric* for different
+      subjects (e.g. views for several channels) — a shared axis is what
+      makes them comparable at a glance.
+    * shared_scale=False (default) — each series is positioned against its
+      *own* max, with no shared numeric axis (gridlines are unlabeled) but
+      every point labeled with its real count. Use this when the series are
+      *different metrics* that legitimately live on different scales (e.g.
+      views vs. reactions vs. shares for one channel) — a shared axis would
+      flatten the smaller ones into an unreadable line hugging zero.
+    """
+    PAD_R, PAD_B = 14, 26
+
+    def __init__(self, series=None, labels=None, max_labels: int = 999,
+                 value_fmt=None, shared_scale: bool = False, parent=None) -> None:
+        super().__init__(parent)
+        self._series = series or []   # [{"label", "color", "values": [...]}]
+        self._labels = list(labels or [])
+        self._max_labels = max_labels
+        self._value_fmt = value_fmt or self._short_num
+        self._shared_scale = shared_scale
+        self._empty_text = "No data"
+        self.setMinimumHeight(260)
+        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
+        self.setMouseTracking(True)
+
+    def set_data(self, series, labels=None, empty_text: str | None = None,
+                shared_scale: bool | None = None) -> None:
+        self._series = series or []
+        if labels is not None:
+            self._labels = list(labels)
+        if empty_text is not None:
+            self._empty_text = empty_text
+        if shared_scale is not None:
+            self._shared_scale = shared_scale
+        self.update()
+
+    @property
+    def _pad_l(self) -> float:
+        return 46 if self._shared_scale else 14   # room for numeric axis labels
+
+    @property
+    def _pad_t(self) -> float:
+        return 28 if self._shared_scale else 14   # headroom for the topmost point's label
+
+    def _plot_rect(self) -> QRectF:
+        w, h = self.width(), self.height()
+        pad_l, pad_t = self._pad_l, self._pad_t
+        return QRectF(pad_l, pad_t, w - pad_l - self.PAD_R, h - pad_t - self.PAD_B)
+
+    def _all_values(self) -> list[float]:
+        vals: list[float] = []
+        for s in self._series:
+            vals.extend(s.get("values") or [])
+        return vals
+
+    # ------------------------------------------------------------- paint
+    def paintEvent(self, _event) -> None:
+        p = QPainter(self)
+        p.setRenderHint(QPainter.RenderHint.Antialiasing)
+        plot = self._plot_rect()
+
+        n = len(self._labels)
+        vals = self._all_values()
+        if n < 2 or not vals or max(vals) <= 0:
+            p.setPen(QColor(COLORS["faint"]))
+            p.drawText(self.rect(), Qt.AlignmentFlag.AlignCenter, self._empty_text)
+            return
+
+        # Reserve headroom above each line's own peak so its value label
+        # never gets clipped by the top edge (shared_scale reserves the same
+        # headroom via a taller PAD_T instead, so the axis numbers stay
+        # exact round values).
+        top_pad_frac = 0.14
+        shared_top = _nice_ceiling(max(vals)) if self._shared_scale else None
+
+        grid_pen = QPen(QColor(COLORS["line"]))
+        grid_pen.setWidthF(1.0)
+        for i in range(5):
+            frac = i / 4
+            y = plot.bottom() - frac * plot.height()
+            p.setPen(grid_pen)
+            p.drawLine(QPointF(plot.left(), y), QPointF(plot.right(), y))
+            if shared_top is not None:
+                p.setPen(QColor(COLORS["faint"]))
+                p.setFont(QFont(self.font().family(), 9))
+                p.drawText(QRectF(0, y - 8, self._pad_l - 8, 16),
+                           Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter,
+                           self._value_fmt(round(shared_top * frac)))
+
+        def x_at(i: int) -> float:
+            return plot.left() + (plot.width() * i / (n - 1)) if n > 1 else plot.center().x()
+
+        label_every = max(1, round(n / self._max_labels))
+        for i, lab in enumerate(self._labels):
+            if i % label_every:
+                continue
+            p.setPen(QColor(COLORS["faint"]))
+            p.setFont(QFont(self.font().family(), 9))
+            p.drawText(QRectF(x_at(i) - 34, plot.bottom() + 4, 68, 18),
+                       Qt.AlignmentFlag.AlignCenter, str(lab))
+
+        label_font = QFont(self.font().family(), 8)
+        for s in self._series:
+            values = s.get("values") or []
+            if len(values) != n:
+                continue
+            series_top = shared_top if shared_top is not None else (max(values) or 1) * (1 + top_pad_frac)
+
+            def y_at(v: float, _top=series_top) -> float:
+                return plot.bottom() - plot.height() * (v / _top) if _top else plot.bottom()
+
+            color = QColor(s.get("color") or COLORS["accent"])
+            pts = [QPointF(x_at(i), y_at(v)) for i, v in enumerate(values)]
+
+            path = QPainterPath(pts[0])
+            for pt in pts[1:]:
+                path.lineTo(pt)
+            pen = QPen(color)
+            pen.setWidthF(2.2)
+            pen.setJoinStyle(Qt.PenJoinStyle.RoundJoin)
+            pen.setCapStyle(Qt.PenCapStyle.RoundCap)
+            p.setPen(pen)
+            p.setBrush(Qt.BrushStyle.NoBrush)
+            p.drawPath(path)
+
+            p.setBrush(QBrush(color))
+            p.setFont(label_font)
+            for i, pt in enumerate(pts):
+                p.setPen(Qt.PenStyle.NoPen)
+                p.drawEllipse(pt, 2.6, 2.6)
+                v = values[i]
+                if v <= 0:
+                    continue
+                p.setPen(color)
+                p.drawText(QRectF(pt.x() - 26, pt.y() - 17, 52, 14),
+                           Qt.AlignmentFlag.AlignCenter, self._value_fmt(v))
+        p.end()
+
+    # ---------------------------------------------------------- tooltip
+    def mouseMoveEvent(self, event) -> None:
+        idx = self._index_at(event.position() if hasattr(event, "position")
+                             else event.pos())
+        if idx is None:
+            QToolTip.hideText()
+        else:
+            pos = (event.globalPosition().toPoint() if hasattr(event, "globalPosition")
+                   else event.globalPos())
+            QToolTip.showText(pos, self._tooltip_text(idx), self)
+        super().mouseMoveEvent(event)
+
+    def leaveEvent(self, event) -> None:
+        QToolTip.hideText()
+        super().leaveEvent(event)
+
+    def _index_at(self, pos) -> int | None:
+        n = len(self._labels)
+        if n < 2:
+            return None
+        plot = self._plot_rect()
+        x = pos.x()
+        if x < plot.left() - 12 or x > plot.right() + 12:
+            return None
+        frac = (x - plot.left()) / plot.width() if plot.width() else 0
+        return min(n - 1, max(0, round(frac * (n - 1))))
+
+    def _tooltip_text(self, idx: int) -> str:
+        lines = []
+        if idx < len(self._labels):
+            lines.append(str(self._labels[idx]))
+        for s in self._series:
+            values = s.get("values") or []
+            if idx < len(values):
+                lines.append(f"{s.get('label', '')}: {self._value_fmt(values[idx])}")
+        return "\n".join(lines)
+
+    @staticmethod
+    def _short_num(v) -> str:
+        v = float(v)
+        if v >= 1_000_000:
+            return f"{v / 1_000_000:.1f}M".replace(".0M", "M")
+        if v >= 1_000:
+            return f"{v / 1_000:.1f}k".replace(".0k", "k")
+        return str(int(v))

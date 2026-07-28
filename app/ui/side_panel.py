@@ -28,6 +28,8 @@ class SidePanel(QFrame):
     compare_requested = Signal(list)  # 2-8 checkpoint keys
     compare_mode_off = Signal()
     compare_md_requested = Signal()
+    compare_charts_selected = Signal(list)  # 0-8 checkpoint keys, live-updates
+    compare_charts_mode_off = Signal()
     fold_requested = Signal()
     language_toggle_requested = Signal()
     folders_changed = Signal()
@@ -39,6 +41,8 @@ class SidePanel(QFrame):
         self.setFixedWidth(256)
         self.compare_mode = False
         self._compare_keys: list[str] = []
+        self.compare_charts_mode = False
+        self._compare_charts_keys: list[str] = []
         self.folder_store = folder_store
 
         root = QVBoxLayout(self)
@@ -81,6 +85,17 @@ class SidePanel(QFrame):
         self.folder_stat_btn.clicked.connect(lambda: self.folder_stat_selected.emit())
         self.group.addButton(self.folder_stat_btn)
         root.addWidget(self.folder_stat_btn)
+
+        # Not part of `self.group`: like Compare below, it repurposes channel
+        # clicks into a multi-select instead of single-page navigation, so it
+        # can't be an exclusive-group "current page" entry the way Config and
+        # Folder Stats are.
+        self.compare_charts_btn = QPushButton(i18n.tr("nav_compare_charts"))
+        self.compare_charts_btn.setObjectName("ghost")
+        self.compare_charts_btn.setCheckable(True)
+        self.compare_charts_btn.setToolTip(i18n.tr("nav_compare_charts_hint"))
+        self.compare_charts_btn.toggled.connect(self._toggle_compare_charts_mode)
+        root.addWidget(self.compare_charts_btn)
 
         root.addSpacing(8)
         section_row = QHBoxLayout()
@@ -137,6 +152,7 @@ class SidePanel(QFrame):
             self.folder_store.set_channel_folder(k, None)
 
         self._compare_keys.clear()
+        self._compare_charts_keys.clear()
         for ch in channels:
             username = ch.get("username") or ""
             label = f"@{username}" if username else (ch.get("title") or ch.get("key", "?"))
@@ -153,7 +169,7 @@ class SidePanel(QFrame):
             # insert above the stretch (last item)
             self.list_lay.insertWidget(self.list_lay.count() - 1, btn)
             self._channel_btns[key] = btn
-        self.group.setExclusive(not self.compare_mode)
+        self.group.setExclusive(not (self.compare_mode or self.compare_charts_mode))
         self.refresh_folder_dots()
 
     # -------------------------------------------------------------- folders
@@ -201,18 +217,47 @@ class SidePanel(QFrame):
         self.folders_changed.emit()
 
     # ------------------------------------------------------------- compare
-    def _toggle_compare_mode(self, on: bool) -> None:
-        self.compare_mode = on
-        self._compare_keys.clear()
+    def _set_channel_multiselect(self, on: bool) -> None:
         self.group.setExclusive(not on)
         for btn in self._channel_btns.values():
             btn.setChecked(False)
+
+    def _toggle_compare_mode(self, on: bool) -> None:
+        if on and self.compare_charts_mode:
+            self.compare_charts_btn.setChecked(False)  # mutually exclusive multi-select modes
+        self.compare_mode = on
+        self._compare_keys.clear()
+        self._set_channel_multiselect(self.compare_mode or self.compare_charts_mode)
         if on:
             self.config_btn.setChecked(False)
         else:
             self.compare_mode_off.emit()
 
+    def _toggle_compare_charts_mode(self, on: bool) -> None:
+        if on and self.compare_mode:
+            self.compare_btn.setChecked(False)  # mutually exclusive multi-select modes
+        self.compare_charts_mode = on
+        self._compare_charts_keys.clear()
+        self._set_channel_multiselect(self.compare_mode or self.compare_charts_mode)
+        if on:
+            self.config_btn.setChecked(False)
+            self.folder_stat_btn.setChecked(False)
+            self.compare_charts_selected.emit([])
+        else:
+            self.compare_charts_mode_off.emit()
+
     def _on_channel_clicked(self, key: str) -> None:
+        if self.compare_charts_mode:
+            btn = self._channel_btns[key]
+            if btn.isChecked():
+                if len(self._compare_charts_keys) >= MAX_COMPARE:
+                    stale = self._compare_charts_keys.pop(0)
+                    self._channel_btns[stale].setChecked(False)
+                self._compare_charts_keys.append(key)
+            elif key in self._compare_charts_keys:
+                self._compare_charts_keys.remove(key)
+            self.compare_charts_selected.emit(list(self._compare_charts_keys))
+            return
         if not self.compare_mode:
             self.channel_selected.emit(key)
             return
@@ -253,6 +298,8 @@ class SidePanel(QFrame):
         self.compare_btn.setToolTip(self.i18n.tr("nav_compare_hint"))
         self.compare_md_btn.setText(self.i18n.tr("nav_compare_md"))
         self.compare_md_btn.setToolTip(self.i18n.tr("nav_compare_md_hint"))
+        self.compare_charts_btn.setText(self.i18n.tr("nav_compare_charts"))
+        self.compare_charts_btn.setToolTip(self.i18n.tr("nav_compare_charts_hint"))
         self.fold_btn.setToolTip(self.i18n.tr("nav_fold_hint"))
         self.lang_btn.setText(self.i18n.lang.upper())
         self.lang_btn.setToolTip(self.i18n.tr("nav_lang_hint"))
