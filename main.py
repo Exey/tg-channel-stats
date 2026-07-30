@@ -11,6 +11,8 @@ import os
 import sys
 from pathlib import Path
 
+from app.version import __version__
+
 APP_NAME = "TgChannelStat"
 
 
@@ -52,14 +54,15 @@ def _configure_logging() -> None:
 def main() -> int:
     _configure_logging()
     logging.getLogger(__name__).info(
-        "%s starting (platform=%s, python=%s)",
-        APP_NAME, sys.platform, sys.version.split()[0])
+        "%s %s starting (platform=%s, python=%s)",
+        APP_NAME, __version__, sys.platform, sys.version.split()[0])
 
     from PySide6.QtWidgets import QApplication
     from app.ui.main_window import MainWindow
 
     app = QApplication.instance() or QApplication(sys.argv)
     app.setApplicationName("TG Channel Stat")
+    app.setApplicationVersion(__version__)
     app.setOrganizationName(APP_NAME)
 
     window = MainWindow()

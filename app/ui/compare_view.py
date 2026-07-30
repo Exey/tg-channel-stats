@@ -15,7 +15,8 @@ from PySide6.QtWidgets import (
 )
 
 from .dashboard_view import fmt_int, short_num
-from .widgets import StatCard
+from .theme import COLORS
+from .widgets import StatCard, hline
 
 # (card key, i18n key) — order here is display order top-to-bottom.
 _METRICS = [
@@ -70,6 +71,8 @@ class CompareView(QWidget):
             for col in self._columns:
                 col["cards"][key].title_lbl.setText(title)
                 col["cards"][key].setToolTip(tip)
+        for col in self._columns:
+            col["section_lbl"].setText(self.tr_("compare_content_quality"))
 
     def _build_ui(self) -> None:
         outer = QVBoxLayout(self)
@@ -120,6 +123,11 @@ class CompareView(QWidget):
 
             col_lay.addWidget(header_widget)
             cards = {}
+            section_lbl = QLabel(self.tr_("compare_content_quality"))
+            section_lbl.setObjectName("smallCapsTitle")
+            section_lbl.setStyleSheet(
+                f"color: {COLORS['faint']}; font-size: 11px; font-weight: 700; "
+                f"letter-spacing: 1.5px; padding-top: 4px;")
             for key, title_key in _METRICS:
                 title = self._metric_title(key, title_key)
                 card = StatCard(title)
@@ -129,6 +137,9 @@ class CompareView(QWidget):
                     card.setToolTip(self.tr_(_TOOLTIPS[key]))
                 cards[key] = card
                 col_lay.addWidget(card)
+                if key == "posts_per_day":
+                    col_lay.addWidget(hline())
+                    col_lay.addWidget(section_lbl)
             col_lay.addStretch()
             holder = QWidget()
             holder.setLayout(col_lay)
@@ -136,7 +147,7 @@ class CompareView(QWidget):
             columns.addWidget(holder, 1)
             self._columns.append({"holder": holder, "name": name_lbl,
                                   "crown": crown_lbl, "username": username_lbl,
-                                  "cards": cards})
+                                  "cards": cards, "section_lbl": section_lbl})
 
     def load(self, datas: list[dict]) -> None:
         datas = datas[:MAX_COMPARE]

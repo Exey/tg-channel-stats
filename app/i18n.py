@@ -15,6 +15,7 @@ EN = {
     "nav_compare_md_hint": "Export the current comparison as a Markdown table",
     "compare_title": "Compare channels",
     "compare_md_metric": "Metric",
+    "compare_content_quality": "CONTENT QUALITY",
     # folders (right-click a channel in the sidebar, or the dashboard's folder
     # button / Config screen's Folders card)
     "folder_none": "No folder",
@@ -251,6 +252,7 @@ RU = {
     "nav_compare_md_hint": "Экспортировать текущее сравнение в таблицу Markdown",
     "compare_title": "Сравнение каналов",
     "compare_md_metric": "Метрика",
+    "compare_content_quality": "КАЧЕСТВО КОНТЕНТА",
     "folder_none": "Без папки",
     "folder_manage": "Управление папками…",
     "folder_manage_title": "Папки",

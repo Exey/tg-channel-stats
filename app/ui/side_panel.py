@@ -14,6 +14,7 @@ from PySide6.QtWidgets import (
 )
 
 from ..folders import FolderStore
+from ..version import __version__
 from .compare_view import MAX_COMPARE
 from .dashboard_view import short_num
 from .folder_dialog import FolderManagerDialog
@@ -62,6 +63,10 @@ class SidePanel(QFrame):
         self.fold_btn.clicked.connect(lambda: self.fold_requested.emit())
         brand_row.addWidget(self.fold_btn)
         root.addLayout(brand_row)
+
+        version_lbl = QLabel(f"v{__version__}")
+        version_lbl.setStyleSheet(f"color: {COLORS['faint']}; font-size: 11px;")
+        root.addWidget(version_lbl)
 
         root.addSpacing(10)
 
