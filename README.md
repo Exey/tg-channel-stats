@@ -97,13 +97,18 @@ build.bat           # Windows
 ```
 
 PyInstaller doesn't cross-compile, so build on each OS you want a binary
-for. Output goes to `dist/`:
+for. Output goes to `dist/` as `tg-channel-stats_<version>` (dots as
+underscores, e.g. `tg-channel-stats_26_7_30`):
 
-- **macOS** — `TgChannelStat-<version>-macos.app`
-- **Windows** — `TgChannelStat-<version>-windows.exe`
-- **Linux** — `TgChannelStat-<version>-linux`
+- **macOS** — `tg-channel-stats_26_7_30.app`
+- **Windows** — `tg-channel-stats_26_7_30.exe`
+- **Linux** — `tg-channel-stats_26_7_30`
 
-The version string comes from `app/version.py`.
+The version string comes from `app/version.py`. Windows and Linux binaries
+also build automatically in CI on every push to `main`
+(`.github/workflows/build.yml`) — download them from the workflow run's
+Artifacts; macOS is left out of CI (10x the Actions minutes of Linux) and
+built locally instead.
 
 ## Getting API credentials
 
