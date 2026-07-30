@@ -23,7 +23,7 @@ Re-run the same script any time to start the app; it only reinstalls if
 `requirements.txt` changed. See [Installation](#installation) for the manual
 equivalent.
 
----
+![tgchanstat.png](https://i.postimg.cc/MWnhLs56/tgchanstat.png)
 
 ## What it does
 
