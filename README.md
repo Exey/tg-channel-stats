@@ -86,6 +86,25 @@ Dependencies (`requirements.txt`):
 - `telethon>=1.34` — Telegram client
 - `qrcode[pil]>=7.4` — renders the QR-code login image
 
+## Building standalone binaries
+
+`build.sh` / `build.bat` package the app into a standalone binary (no Python
+install required to run it) via [PyInstaller](https://pyinstaller.org/):
+
+```bash
+./build.sh          # macOS / Linux
+build.bat           # Windows
+```
+
+PyInstaller doesn't cross-compile, so build on each OS you want a binary
+for. Output goes to `dist/`:
+
+- **macOS** — `TgChannelStat-<version>-macos.app`
+- **Windows** — `TgChannelStat-<version>-windows.exe`
+- **Linux** — `TgChannelStat-<version>-linux`
+
+The version string comes from `app/version.py`.
+
 ## Getting API credentials
 
 1. Open [my.telegram.org](https://my.telegram.org) and log in with your phone
@@ -137,8 +156,12 @@ folder** to jump straight there.
 ```
 main.py                     # entry point: logging, theme, main window
 run_dev.sh / run_dev.bat    # create venv, install deps, launch (macOS·Linux / Windows)
+build.py                    # PyInstaller packaging, invoked by build.sh/build.bat
+build.sh / build.bat        # create venv, install build deps, package a binary
 requirements.txt
+requirements-build.txt      # PyInstaller, only needed to package binaries
 app/
+├── version.py              # app version string (CalVer: YY.M.D)
 ├── config.py               # JSON config: profiles + .env import/export
 ├── store.py                # per-channel JSON checkpoint store
 ├── worker.py               # QThread workers: login flows + tool runs

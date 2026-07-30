@@ -1,6 +1,9 @@
 .venv
+__pycache__/
 app/__pycache__
 app/tools/__pycache__
 app/ui/__pycache__
 .claude
 .DS_Store
+/dist
+/build
