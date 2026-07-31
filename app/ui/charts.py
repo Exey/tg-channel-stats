@@ -1,11 +1,14 @@
 """Native, QPainter-drawn charts — no matplotlib, no QtCharts.
 
-Two widgets cover the whole dashboard:
+Widgets in here:
 
-* BarChart   — the dashboard-style bar chart: a faint full-height "track"
-               behind every column, a rounded gradient value bar on top,
-               light y-gridlines with labels, and (thinned) x labels.
-* Sparkline  — a small trend line with a soft gradient fill, for stat cards.
+* BarChart      — the dashboard-style bar chart: a faint full-height "track"
+                  behind every column, a rounded gradient value bar on top,
+                  light y-gridlines with labels, and (thinned) x labels.
+* Sparkline     — a small trend line with a soft gradient fill, for stat cards.
+* MultiLineChart — several count-valued trend lines sharing one x-axis.
+* GaugeDial     — a read-only circular gauge (QDial subclass) colored red to
+                  green by value; used for the Content Quality Index cards.
 """
 from __future__ import annotations
 
@@ -13,7 +16,7 @@ from PySide6.QtCore import QPointF, QRectF, Qt
 from PySide6.QtGui import (
     QBrush, QColor, QFont, QLinearGradient, QPainter, QPainterPath, QPen,
 )
-from PySide6.QtWidgets import QSizePolicy, QToolTip, QWidget
+from PySide6.QtWidgets import QDial, QSizePolicy, QToolTip, QWidget
 
 from .theme import COLORS
 
@@ -426,3 +429,88 @@ class MultiLineChart(QWidget):
         if v >= 1_000:
             return f"{v / 1_000:.1f}k".replace(".0k", "k")
         return str(int(v))
+
+
+class GaugeDial(QDial):
+    """A read-only circular gauge: a 270° arc, colored red (low) through
+    amber to green (high) by value, with the numeric value centered inside.
+
+    QDial's own QSS support is unreliable for this kind of colored-arc look
+    across platforms (macOS in particular tends to ignore it), so this
+    overrides paintEvent entirely and hand-draws the arc with QPainter —
+    the same approach the other chart widgets in this module use. It's
+    still a real QDial (as opposed to a plain QWidget) so setRange/setValue
+    keep working as expected; mouse/wheel/key events are swallowed so it
+    can't be dragged out of sync with the score it's displaying.
+    """
+    ARC_SPAN = 270          # degrees the gauge sweeps
+    ARC_START = 225         # degrees, Qt convention: 0 = 3 o'clock, CCW+
+
+    def __init__(self, minimum: int = 0, maximum: int = 1000, parent=None) -> None:
+        super().__init__(parent)
+        self.setRange(minimum, maximum)
+        self.setNotchesVisible(False)
+        self.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        self.setCursor(Qt.CursorShape.ArrowCursor)
+
+    # ------------------------------------------------------- display-only
+    def mousePressEvent(self, event) -> None:
+        event.ignore()
+
+    def mouseMoveEvent(self, event) -> None:
+        event.ignore()
+
+    def wheelEvent(self, event) -> None:
+        event.ignore()
+
+    def keyPressEvent(self, event) -> None:
+        event.ignore()
+
+    # ------------------------------------------------------------- color
+    @staticmethod
+    def _color_for(frac: float) -> QColor:
+        """Red -> amber -> green as frac goes 0 -> 1."""
+        frac = max(0.0, min(1.0, frac))
+        stops = [QColor(COLORS["hot"]), QColor(COLORS["warn"]), QColor(COLORS["good"])]
+        seg = frac * (len(stops) - 1)
+        i = min(int(seg), len(stops) - 2)
+        t = seg - i
+        c1, c2 = stops[i], stops[i + 1]
+        return QColor(
+            int(c1.red() + (c2.red() - c1.red()) * t),
+            int(c1.green() + (c2.green() - c1.green()) * t),
+            int(c1.blue() + (c2.blue() - c1.blue()) * t),
+        )
+
+    # ------------------------------------------------------------- paint
+    def paintEvent(self, _event) -> None:
+        p = QPainter(self)
+        p.setRenderHint(QPainter.RenderHint.Antialiasing)
+
+        side = min(self.width(), self.height())
+        pen_w = max(4.0, side * 0.09)
+        pad = pen_w / 2 + 3
+        rect = QRectF((self.width() - side) / 2 + pad, (self.height() - side) / 2 + pad,
+                      side - 2 * pad, side - 2 * pad)
+
+        span = self.maximum() - self.minimum()
+        frac = (self.value() - self.minimum()) / span if span else 0.0
+
+        track_pen = QPen(QColor(COLORS["accent_track"]))
+        track_pen.setWidthF(pen_w)
+        track_pen.setCapStyle(Qt.PenCapStyle.RoundCap)
+        p.setPen(track_pen)
+        p.drawArc(rect, self.ARC_START * 16, -self.ARC_SPAN * 16)
+
+        if frac > 0:
+            val_pen = QPen(self._color_for(frac))
+            val_pen.setWidthF(pen_w)
+            val_pen.setCapStyle(Qt.PenCapStyle.RoundCap)
+            p.setPen(val_pen)
+            p.drawArc(rect, self.ARC_START * 16, -int(self.ARC_SPAN * 16 * frac))
+
+        p.setPen(QColor(COLORS["text"]))
+        f = QFont(self.font().family(), max(9, int(side * 0.16)), QFont.Weight.Bold)
+        p.setFont(f)
+        p.drawText(self.rect(), Qt.AlignmentFlag.AlignCenter, str(int(round(self.value()))))
+        p.end()

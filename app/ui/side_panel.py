@@ -25,6 +25,7 @@ from .widgets import NavButton, folder_icon, hline
 class SidePanel(QFrame):
     config_selected = Signal()
     folder_stat_selected = Signal()
+    content_quality_selected = Signal()
     channel_selected = Signal(str)   # checkpoint key
     compare_requested = Signal(list)  # 2-8 checkpoint keys
     compare_mode_off = Signal()
@@ -86,18 +87,24 @@ class SidePanel(QFrame):
         config_row.addWidget(self.lang_btn)
         root.addLayout(config_row)
 
-        self.folder_stat_btn = NavButton("graph", i18n.tr("nav_folder_stat"))
+        # icon_name=None on these three: the label carries its own emoji, so
+        # a second SVG icon column would be redundant — left-aligned via
+        # #navBtn's QSS the same as every other nav entry.
+        self.folder_stat_btn = NavButton(None, i18n.tr("nav_folder_stat"))
         self.folder_stat_btn.clicked.connect(lambda: self.folder_stat_selected.emit())
         self.group.addButton(self.folder_stat_btn)
         root.addWidget(self.folder_stat_btn)
+
+        self.content_quality_btn = NavButton(None, i18n.tr("nav_content_quality"))
+        self.content_quality_btn.clicked.connect(lambda: self.content_quality_selected.emit())
+        self.group.addButton(self.content_quality_btn)
+        root.addWidget(self.content_quality_btn)
 
         # Not part of `self.group`: like Compare below, it repurposes channel
         # clicks into a multi-select instead of single-page navigation, so it
         # can't be an exclusive-group "current page" entry the way Config and
         # Folder Stats are.
-        self.compare_charts_btn = QPushButton(i18n.tr("nav_compare_charts"))
-        self.compare_charts_btn.setObjectName("ghost")
-        self.compare_charts_btn.setCheckable(True)
+        self.compare_charts_btn = NavButton(None, i18n.tr("nav_compare_charts"))
         self.compare_charts_btn.setToolTip(i18n.tr("nav_compare_charts_hint"))
         self.compare_charts_btn.toggled.connect(self._toggle_compare_charts_mode)
         root.addWidget(self.compare_charts_btn)
@@ -247,6 +254,7 @@ class SidePanel(QFrame):
         if on:
             self.config_btn.setChecked(False)
             self.folder_stat_btn.setChecked(False)
+            self.content_quality_btn.setChecked(False)
             self.compare_charts_selected.emit([])
         else:
             self.compare_charts_mode_off.emit()
@@ -284,6 +292,9 @@ class SidePanel(QFrame):
     def select_folder_stat(self) -> None:
         self.folder_stat_btn.setChecked(True)
 
+    def select_content_quality(self) -> None:
+        self.content_quality_btn.setChecked(True)
+
     def select_channel(self, key: str) -> None:
         btn = self._channel_btns.get(key)
         if btn:
@@ -298,12 +309,13 @@ class SidePanel(QFrame):
     def retranslate(self) -> None:
         self.config_btn.set_text(self.i18n.tr("nav_config"))
         self.folder_stat_btn.set_text(self.i18n.tr("nav_folder_stat"))
+        self.content_quality_btn.set_text(self.i18n.tr("nav_content_quality"))
         self.empty_lbl.setText(self.i18n.tr("nav_no_channels"))
         self.compare_btn.setText(self.i18n.tr("nav_compare"))
         self.compare_btn.setToolTip(self.i18n.tr("nav_compare_hint"))
         self.compare_md_btn.setText(self.i18n.tr("nav_compare_md"))
         self.compare_md_btn.setToolTip(self.i18n.tr("nav_compare_md_hint"))
-        self.compare_charts_btn.setText(self.i18n.tr("nav_compare_charts"))
+        self.compare_charts_btn.set_text(self.i18n.tr("nav_compare_charts"))
         self.compare_charts_btn.setToolTip(self.i18n.tr("nav_compare_charts_hint"))
         self.fold_btn.setToolTip(self.i18n.tr("nav_fold_hint"))
         self.lang_btn.setText(self.i18n.lang.upper())

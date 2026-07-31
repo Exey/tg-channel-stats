@@ -62,6 +62,22 @@ def _top_ids(rows: list[dict], key: str, n: int) -> set[int]:
     return {r["id"] for r in ranked[:n]}
 
 
+def _trimmed_mean_drop_top(values: list[int], drop_frac: float) -> float:
+    """Mean after dropping the top `drop_frac` fraction of values (sorted
+    ascending) — a true trimmed mean over the *whole* distribution, not
+    just excluding the single largest value. Used for avg_reposts_trimmed:
+    reposts are far more top-heavy than views/reactions (one giveaway or
+    forward chain can be a huge share of a channel's total repost count
+    across its whole history), so the plain average swings on outliers
+    much more than it should for "typical performance"."""
+    if not values:
+        return 0.0
+    vals = sorted(values)
+    keep_n = max(1, round(len(vals) * (1 - drop_frac)))
+    kept = vals[:keep_n]
+    return sum(kept) / len(kept)
+
+
 async def _public_forwards(client, input_channel, msg_id: int) -> dict:
     """{'count': int, 'items': [{title, link, views}]} for one post, or
     {'count': -1, 'items': []} if stats aren't available for this channel."""
@@ -239,6 +255,7 @@ async def run_channel_stat(client, p: dict, ctx) -> str:
     sum_views_last_year = 0
     sum_forwards_last_year = 0
     views_seen: list[int] = []  # per-post views, for the viral-share pass below
+    forwards_seen: list[int] = []  # per-post reposts, for the trimmed-mean pass below
     with_media = with_photo = with_document = 0
     hour_dist = [0] * 24
     weekday_dist = [0] * 7
@@ -273,6 +290,7 @@ async def run_channel_stat(client, p: dict, ctx) -> str:
         max_views = max(max_views, v)
         sum_reactions += row["reactions"]
         sum_forwards += row["forwards"]
+        forwards_seen.append(row["forwards"])
         max_forwards = max(max_forwards, row["forwards"])
         if msg.date and msg.date.year == last_full_year:
             sum_views_last_year += v
@@ -365,6 +383,10 @@ async def run_channel_stat(client, p: dict, ctx) -> str:
         "max_views": max_views,
         "avg_reactions": round(sum_reactions / posts, 1) if posts else 0,
         "avg_reposts": round(sum_forwards / posts, 1) if posts else 0,
+        # Top 10% (by reposts) dropped before averaging — see
+        # _trimmed_mean_drop_top. Used where a plain average would swing
+        # too much on one-off repost spikes (e.g. Content Quality Index).
+        "avg_reposts_trimmed": round(_trimmed_mean_drop_top(forwards_seen, 0.10), 2),
         "max_reposts": max_forwards,
         "avg_views_settled": round(sum_views_settled / views_settled_n, 1)
                              if views_settled_n else 0,

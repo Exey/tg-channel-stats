@@ -35,7 +35,7 @@ EN = {
     "folder_list_empty": "No folders yet.",
     "folder_choose": "Assign this channel to a folder",
     # folder stat view
-    "nav_folder_stat": "Folder Stats",
+    "nav_folder_stat": "📁 Folder Stats",
     "folder_stat_sub": "Cross-channel links and periodic stats for one folder",
     "folder_stat_pick_folder": "Folder:",
     "folder_stat_no_folders": "No folders yet — create one from the Config screen.",
@@ -57,6 +57,7 @@ EN = {
                                "left blank — fill them in later.",
     "period_mode_month": "Monthly",
     "period_mode_season": "Seasonal",
+    "period_mode_all": "All time",
     "col_channel_title": "Title",
     "col_username_id": "Username/ID",
     "col_shares": "Shares",
@@ -66,6 +67,27 @@ EN = {
     "col_name": "Name",
     "col_website": "Website",
     "folder_stat_period_empty": "No posts found for this folder.",
+    # content quality index view
+    "nav_content_quality": "🎯 Content Quality",
+    "cqi_sub": "CQI = ERV% × Virality Index × 100\n"
+              "(ERV% = (avg reactions + avg reposts*) / avg views × 100)\n"
+              "(Virality Index = max views / avg views (capped at 10×))\n"
+              "❤️ Reaction Depth = saturate(avg reactions / avg views, K=0.015)\n"
+              "🔄 Shareability = saturate(avg reposts* / avg views, K=0.005)\n"
+              "🚀 Viral Boost = saturate((Virality Index − 1) × 100, K=100)\n"
+              "*top 10% (by reposts) trimmed before averaging",
+    "cqi_score_tooltip": "{label}\n"
+                         "CQI = ERV% × Virality Index × 100 = {cqi}\n\n"
+                         "ERV% = (avg reactions + avg reposts*) / avg views × 100\n"
+                         "     = ({reactions} + {reposts}) / {views} × 100 = {erv}%\n\n"
+                         "Virality Index = max views / avg views (capped at 10×)\n"
+                         "     = {max_views} / {views} = {virality}×\n\n"
+                         "Gauge: {gauge} / 1000\n"
+                         "*avg reposts has the top 10% (by reposts) trimmed "
+                         "before averaging",
+    "cqi_tooltip_capped_note": "Raw virality index was {raw}× — capped at "
+                               "{cap}× so one outlier post can't dominate "
+                               "the score",
     # compare charts view
     "nav_compare_charts": "📈 Compare Charts",
     "nav_compare_charts_hint": "Pick up to 8 channels to compare on charts.",
@@ -270,7 +292,7 @@ RU = {
     "folder_list_empty": "Пока нет папок.",
     "folder_choose": "Добавить канал в папку",
     # folder stat view
-    "nav_folder_stat": "Статистика папки",
+    "nav_folder_stat": "📁 Статистика папки",
     "folder_stat_sub": "Связи между каналами и статистика по периодам для одной папки",
     "folder_stat_pick_folder": "Папка:",
     "folder_stat_no_folders": "Пока нет папок — создайте на экране настроек.",
@@ -293,6 +315,7 @@ RU = {
                                "заполните их позже.",
     "period_mode_month": "По месяцам",
     "period_mode_season": "По сезонам",
+    "period_mode_all": "За всё время",
     "col_channel_title": "Название",
     "col_username_id": "Username/ID",
     "col_shares": "Репосты",
@@ -302,6 +325,29 @@ RU = {
     "col_name": "Имя",
     "col_website": "Сайт",
     "folder_stat_period_empty": "Постов в этой папке не найдено.",
+    # content quality index view
+    "nav_content_quality": "🎯 Качество контента",
+    "cqi_sub": "CQI = ERV% × Индекс виральности × 100\n"
+              "(ERV% = (ср. реакции + ср. репосты*) / ср. просмотры × 100)\n"
+              "(Индекс виральности = макс. просмотры / ср. просмотры "
+              "(ограничен до 10×))\n"
+              "❤️ Глубина реакций = насыщение(ср. реакции / ср. просмотры, K=0.015)\n"
+              "🔄 Репостоспособность = насыщение(ср. репосты* / ср. просмотры, K=0.005)\n"
+              "🚀 Виральный потенциал = насыщение((Индекс виральности − 1) × 100, K=100)\n"
+              "*верхние 10% (по репостам) отброшены перед усреднением",
+    "cqi_score_tooltip": "{label}\n"
+                         "CQI = ERV% × Индекс виральности × 100 = {cqi}\n\n"
+                         "ERV% = (ср. реакции + ср. репосты*) / ср. просмотры × 100\n"
+                         "     = ({reactions} + {reposts}) / {views} × 100 = {erv}%\n\n"
+                         "Индекс виральности = макс. просмотры / ср. просмотры "
+                         "(ограничен до 10×)\n"
+                         "     = {max_views} / {views} = {virality}×\n\n"
+                         "Шкала: {gauge} / 1000\n"
+                         "*ср. репосты — верхние 10% (по репостам) отброшены "
+                         "перед усреднением",
+    "cqi_tooltip_capped_note": "Исходный индекс виральности был {raw}× — "
+                               "ограничен до {cap}×, чтобы один аномальный "
+                               "пост не доминировал в оценке",
     # compare charts view
     "nav_compare_charts": "📈 Сравнить на графиках",
     "nav_compare_charts_hint": "Выберите до 8 каналов для сравнения на графиках.",

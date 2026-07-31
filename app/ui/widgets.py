@@ -158,9 +158,14 @@ class SectionCard(Card):
 
 
 class NavButton(QPushButton):
-    """Sidebar entry: recolorable SVG icon + label, checkable & exclusive."""
+    """Sidebar entry: recolorable SVG icon + label, checkable & exclusive.
 
-    def __init__(self, icon_name: str, text: str, parent=None) -> None:
+    icon_name=None skips the SVG icon column entirely — for entries whose
+    label already carries its own emoji (e.g. "📁 Folder Stats") and don't
+    want a second, redundant icon on top of it.
+    """
+
+    def __init__(self, icon_name: str | None, text: str, parent=None) -> None:
         super().__init__(parent)
         self.setObjectName("navBtn")
         self.setCheckable(True)
@@ -175,7 +180,10 @@ class NavButton(QPushButton):
         self._icon = QLabel()
         self._icon.setFixedSize(22, 22)
         self._icon.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
-        lay.addWidget(self._icon)
+        if icon_name:
+            lay.addWidget(self._icon)
+        else:
+            self._icon.setVisible(False)
         self._label = QLabel(text)
         self._label.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
         lay.addWidget(self._label, 1)
@@ -190,6 +198,8 @@ class NavButton(QPushButton):
         self._sync_icon(False)
 
     def _sync_icon(self, checked: bool) -> None:
+        if not self._icon_name:
+            return
         color = self._folder_color or (COLORS["accent"] if checked else COLORS["muted"])
         self._icon.setPixmap(svg_pixmap(self._icon_name, color, 20))
 

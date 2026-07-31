@@ -187,10 +187,14 @@ class FolderStatView(QWidget):
         self.mode_month_btn = QPushButton(self.tr_("period_mode_month"))
         self.mode_month_btn.setObjectName("ghost")
         self.mode_month_btn.setCheckable(True)
+        self.mode_all_btn = QPushButton(self.tr_("period_mode_all"))
+        self.mode_all_btn.setObjectName("ghost")
+        self.mode_all_btn.setCheckable(True)
         self._mode_btn_group = QButtonGroup(self)
         self._mode_btn_group.setExclusive(True)
         self._mode_btn_group.addButton(self.mode_season_btn)
         self._mode_btn_group.addButton(self.mode_month_btn)
+        self._mode_btn_group.addButton(self.mode_all_btn)
 
         self.period_md_btn = QPushButton(self.tr_("save_md_button"))
         self.period_md_btn.clicked.connect(self._save_md)
@@ -223,11 +227,13 @@ class FolderStatView(QWidget):
         # wire the signal and set the default mode (which fires it once).
         self.mode_season_btn.toggled.connect(lambda checked: self._on_mode_toggled("season", checked))
         self.mode_month_btn.toggled.connect(lambda checked: self._on_mode_toggled("month", checked))
+        self.mode_all_btn.toggled.connect(lambda checked: self._on_mode_toggled("all", checked))
         self.mode_season_btn.setChecked(True)
 
         mode_row = QHBoxLayout()
         mode_row.addWidget(self.mode_season_btn)
         mode_row.addWidget(self.mode_month_btn)
+        mode_row.addWidget(self.mode_all_btn)
         mode_row.addStretch()
         mode_row.addWidget(self.period_md_btn)
 
@@ -347,11 +353,16 @@ class FolderStatView(QWidget):
                 count = int(m.get("count", 0) or 0)
                 if not count:
                     continue
-                try:
-                    year, month = (int(x) for x in m.get("label", "").split("-"))
-                except ValueError:
-                    continue
-                key, label = _period_key_label(year, month, mode)
+                if mode == "all":
+                    # Everything collapses into a single bucket — there's
+                    # only ever one "All time" period, so no year/month key.
+                    key, label = ("all",), self.tr_("period_mode_all")
+                else:
+                    try:
+                        year, month = (int(x) for x in m.get("label", "").split("-"))
+                    except ValueError:
+                        continue
+                    key, label = _period_key_label(year, month, mode)
                 b = buckets.setdefault(key, {
                     "label": label, "count": 0, "views": 0, "shares": 0,
                     "reactions": 0, "viral_count": 0, "top_row": None,
@@ -536,6 +547,15 @@ class FolderStatView(QWidget):
         self._period_btn_group.setExclusive(True)
         self._period_btns = {}
 
+        if self._period_mode == "all":
+            # Only one possible period, so there's nothing to pick — go
+            # straight to the aggregated table.
+            self.picker_container.setVisible(False)
+            self._selected_period_key = ("all",)
+            self._rebuild_selected_period_table()
+            return
+        self.picker_container.setVisible(True)
+
         keys_labels = self._collect_all_period_keys(self._period_mode)
         if self._period_mode == "season":
             self._build_season_picker(keys_labels)
@@ -707,6 +727,7 @@ class FolderStatView(QWidget):
         self.period_hint_lbl.setText(self.tr_("folder_stat_period_hint"))
         self.mode_season_btn.setText(self.tr_("period_mode_season"))
         self.mode_month_btn.setText(self.tr_("period_mode_month"))
+        self.mode_all_btn.setText(self.tr_("period_mode_all"))
         self.period_md_btn.setText(self.tr_("save_md_button"))
         self.period_empty_lbl.setText(self.tr_("folder_stat_period_empty"))
         self.period_table.setHorizontalHeaderLabels([
