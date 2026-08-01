@@ -34,6 +34,13 @@ EN = {
                           "to organize channels in the sidebar.",
     "folder_list_empty": "No folders yet.",
     "folder_choose": "Assign this channel to a folder",
+    "folder_comments_refresh_label": "Refresh comments for:",
+    "folder_comments_refresh_btn": "💬 Refresh comments",
+    "folder_comments_refresh_hint": "Re-fetch just the comment count for "
+                                    "every stored post in this folder's "
+                                    "channels — much faster than a full "
+                                    "re-fetch since it skips everything "
+                                    "else.",
     # folder stat view
     "nav_folder_stat": "📁 Folder Stats",
     "folder_stat_sub": "Cross-channel links and periodic stats for one folder",
@@ -67,27 +74,36 @@ EN = {
     "col_name": "Name",
     "col_website": "Website",
     "folder_stat_period_empty": "No posts found for this folder.",
-    # content quality index view
-    "nav_content_quality": "🎯 Content Quality",
-    "cqi_sub": "CQI = ERV% × Virality Index × 100\n"
-              "(ERV% = (avg reactions + avg reposts*) / avg views × 100)\n"
-              "(Virality Index = max views / avg views (capped at 10×))\n"
-              "❤️ Reaction Depth = saturate(avg reactions / avg views, K=0.015)\n"
-              "🔄 Shareability = saturate(avg reposts* / avg views, K=0.005)\n"
-              "🚀 Viral Boost = saturate((Virality Index − 1) × 100, K=100)\n"
-              "*top 10% (by reposts) trimmed before averaging",
-    "cqi_score_tooltip": "{label}\n"
-                         "CQI = ERV% × Virality Index × 100 = {cqi}\n\n"
-                         "ERV% = (avg reactions + avg reposts*) / avg views × 100\n"
-                         "     = ({reactions} + {reposts}) / {views} × 100 = {erv}%\n\n"
-                         "Virality Index = max views / avg views (capped at 10×)\n"
-                         "     = {max_views} / {views} = {virality}×\n\n"
-                         "Gauge: {gauge} / 1000\n"
-                         "*avg reposts has the top 10% (by reposts) trimmed "
-                         "before averaging",
-    "cqi_tooltip_capped_note": "Raw virality index was {raw}× — capped at "
-                               "{cap}× so one outlier post can't dominate "
-                               "the score",
+    # high-quality posts view
+    "nav_content_quality": "🎯 High-Quality Posts",
+    "cqi_fetch_media": "🖼 Fetch media",
+    "cqi_fetch_media_running": "Fetching…",
+    "cqi_fetch_media_hint": "Download a small preview image for each post "
+                            "shown below (only posts without one already "
+                            "cached are fetched)",
+    "cqi_fetch_media_need_login": "Add your Telegram API credentials on the "
+                                  "Config screen first.",
+    "cqi_fetch_media_login_required": "This needs a Telegram login — please "
+                                      "log in from the Config screen first, "
+                                      "then try again.",
+    "cqi_empty_posts": "No posts found for this folder in this period.",
+    "cqi_post_tooltip": "{label}\nScore: {score}",
+    "cqi_post_tooltip_formula": "ERV% = (forwards×{fwd_w} + comments×{cmt_w} "
+                                "+ reactions×{rct_w}) / views × 100\n"
+                                "     = ({forwards}×{fwd_w} + {comments}×{cmt_w} "
+                                "+ {reactions}×{rct_w}) / {views} × 100\n"
+                                "     = {erv}%\n"
+                                "raw score = ERV% × 100 = {raw}\n"
+                                "gauge = raw / (raw + {k}) × 1000 = {gauge}",
+    "cqi_tg_links": "🅰️ Tg Links",
+    "cqi_tg_links_hint": "Generate a copyable text list of links to the "
+                         "posts shown below, ranked by score.",
+    "cqi_tg_links_dialog_title": "Tg Links",
+    "cqi_tg_links_header": "{folder} High-Quality posts for {period}",
+    "cqi_tg_links_limit_hint": "Limit how many posts from the same channel "
+                               "are shown below and in the Tg Links list.",
+    "cqi_tg_links_limit_none": "No limit",
+    "cqi_tg_links_limit_n": "{n} per ch",
     # compare charts view
     "nav_compare_charts": "📈 Compare Charts",
     "nav_compare_charts_hint": "Pick up to 8 channels to compare on charts.",
@@ -291,6 +307,13 @@ RU = {
                           "удаляйте папки для организации каналов в боковой панели.",
     "folder_list_empty": "Пока нет папок.",
     "folder_choose": "Добавить канал в папку",
+    "folder_comments_refresh_label": "Обновить комментарии для:",
+    "folder_comments_refresh_btn": "💬 Обновить комментарии",
+    "folder_comments_refresh_hint": "Заново получить только число "
+                                    "комментариев для каждого сохранённого "
+                                    "поста в каналах этой папки — намного "
+                                    "быстрее полной перезагрузки, так как "
+                                    "остальное не трогает.",
     # folder stat view
     "nav_folder_stat": "📁 Статистика папки",
     "folder_stat_sub": "Связи между каналами и статистика по периодам для одной папки",
@@ -325,29 +348,36 @@ RU = {
     "col_name": "Имя",
     "col_website": "Сайт",
     "folder_stat_period_empty": "Постов в этой папке не найдено.",
-    # content quality index view
-    "nav_content_quality": "🎯 Качество контента",
-    "cqi_sub": "CQI = ERV% × Индекс виральности × 100\n"
-              "(ERV% = (ср. реакции + ср. репосты*) / ср. просмотры × 100)\n"
-              "(Индекс виральности = макс. просмотры / ср. просмотры "
-              "(ограничен до 10×))\n"
-              "❤️ Глубина реакций = насыщение(ср. реакции / ср. просмотры, K=0.015)\n"
-              "🔄 Репостоспособность = насыщение(ср. репосты* / ср. просмотры, K=0.005)\n"
-              "🚀 Виральный потенциал = насыщение((Индекс виральности − 1) × 100, K=100)\n"
-              "*верхние 10% (по репостам) отброшены перед усреднением",
-    "cqi_score_tooltip": "{label}\n"
-                         "CQI = ERV% × Индекс виральности × 100 = {cqi}\n\n"
-                         "ERV% = (ср. реакции + ср. репосты*) / ср. просмотры × 100\n"
-                         "     = ({reactions} + {reposts}) / {views} × 100 = {erv}%\n\n"
-                         "Индекс виральности = макс. просмотры / ср. просмотры "
-                         "(ограничен до 10×)\n"
-                         "     = {max_views} / {views} = {virality}×\n\n"
-                         "Шкала: {gauge} / 1000\n"
-                         "*ср. репосты — верхние 10% (по репостам) отброшены "
-                         "перед усреднением",
-    "cqi_tooltip_capped_note": "Исходный индекс виральности был {raw}× — "
-                               "ограничен до {cap}×, чтобы один аномальный "
-                               "пост не доминировал в оценке",
+    # high-quality posts view
+    "nav_content_quality": "🎯 Лучшие посты",
+    "cqi_fetch_media": "🖼 Загрузить медиа",
+    "cqi_fetch_media_running": "Загрузка…",
+    "cqi_fetch_media_hint": "Загрузить маленькое превью для каждого поста "
+                            "ниже (загружаются только те, для которых ещё "
+                            "нет кэша)",
+    "cqi_fetch_media_need_login": "Сначала добавьте данные Telegram API на "
+                                  "экране настроек.",
+    "cqi_fetch_media_login_required": "Нужен вход в Telegram — сначала "
+                                      "войдите на экране настроек, затем "
+                                      "попробуйте снова.",
+    "cqi_empty_posts": "Постов в этой папке за этот период не найдено.",
+    "cqi_post_tooltip": "{label}\nОценка: {score}",
+    "cqi_post_tooltip_formula": "ERV% = (репосты×{fwd_w} + комментарии×{cmt_w} "
+                                "+ реакции×{rct_w}) / просмотры × 100\n"
+                                "     = ({forwards}×{fwd_w} + {comments}×{cmt_w} "
+                                "+ {reactions}×{rct_w}) / {views} × 100\n"
+                                "     = {erv}%\n"
+                                "сырой балл = ERV% × 100 = {raw}\n"
+                                "шкала = сырой / (сырой + {k}) × 1000 = {gauge}",
+    "cqi_tg_links": "🅰️ Ссылки",
+    "cqi_tg_links_hint": "Сформировать копируемый текстовый список ссылок "
+                         "на посты ниже, по убыванию оценки.",
+    "cqi_tg_links_dialog_title": "Ссылки",
+    "cqi_tg_links_header": "{folder} — лучшие посты за {period}",
+    "cqi_tg_links_limit_hint": "Ограничить число постов одного канала ниже "
+                               "и в списке ссылок.",
+    "cqi_tg_links_limit_none": "Без ограничения",
+    "cqi_tg_links_limit_n": "{n} с канала",
     # compare charts view
     "nav_compare_charts": "📈 Сравнить на графиках",
     "nav_compare_charts_hint": "Выберите до 8 каналов для сравнения на графиках.",

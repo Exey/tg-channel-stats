@@ -86,9 +86,10 @@ class MainWindow(QMainWindow):
         content_col.addLayout(top_strip)
 
         self.stack = QStackedWidget()
-        self.config_view = ConfigView(self.cfg, self.i18n, self.folder_store)
+        self.config_view = ConfigView(self.cfg, self.i18n, self.folder_store, self.store)
         self.config_view.channel_fetched.connect(self._on_channel_fetched)
         self.config_view.folders_changed.connect(self._on_folders_changed)
+        self.config_view.checkpoints_changed.connect(self._refresh_sidebar)
         self.dashboard = DashboardView(self.i18n, self.folder_store)
         self.dashboard.refetch_requested.connect(self._on_refetch)
         self.dashboard.remove_requested.connect(self._on_remove)
@@ -96,7 +97,7 @@ class MainWindow(QMainWindow):
         self.compare = CompareView(self.i18n)
         self.folder_stat = FolderStatView(self.i18n, self.folder_store, self.store)
         self.compare_charts = CompareChartsView(self.i18n)
-        self.content_quality = ContentQualityView(self.i18n, self.folder_store, self.store)
+        self.content_quality = ContentQualityView(self.i18n, self.folder_store, self.store, self.cfg)
         self.stack.addWidget(self.config_view)       # index 0
         self.stack.addWidget(self.dashboard)         # index 1
         self.stack.addWidget(self.compare)           # index 2

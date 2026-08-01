@@ -121,10 +121,10 @@ class PublicForwardsDialog(QDialog):
 
 
 class ChannelReportDialog(QDialog):
-    def __init__(self, parent, i18n, text: str) -> None:
+    def __init__(self, parent, i18n, text: str, title: str | None = None) -> None:
         super().__init__(parent)
         self._text = text
-        self.setWindowTitle(i18n.tr("report_dialog_title"))
+        self.setWindowTitle(title or i18n.tr("report_dialog_title"))
         self.resize(640, 480)
         root = QVBoxLayout(self)
         view = QPlainTextEdit()

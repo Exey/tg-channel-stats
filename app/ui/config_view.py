@@ -19,7 +19,9 @@ from PySide6.QtWidgets import (
 
 from ..config import CONN_FIELDS, config_dir
 from ..folders import FolderStore
+from ..store import ChannelStore
 from ..tools.channel_stat import run_channel_stat
+from ..tools.comments_refresh import run_comments_refresh
 from ..worker import CheckLoginWorker, ToolWorker
 from .folder_dialog import FolderManagerDialog
 from .qr_login_dialog import QrLoginDialog
@@ -31,12 +33,15 @@ PERIOD_KEYS = ["3m", "6m", "1y", "2y", "3y", "all"]
 class ConfigView(QWidget):
     channel_fetched = Signal(dict)   # full channel_stat payload
     folders_changed = Signal()
+    checkpoints_changed = Signal()   # a folder's checkpoints were updated in place
 
-    def __init__(self, cfg, i18n, folder_store: FolderStore, parent=None) -> None:
+    def __init__(self, cfg, i18n, folder_store: FolderStore, channel_store: ChannelStore,
+                parent=None) -> None:
         super().__init__(parent)
         self.cfg = cfg
         self.i18n = i18n
         self.folder_store = folder_store
+        self.channel_store = channel_store
         self.worker: ToolWorker | None = None
         self._build_ui()
         self._load_fields()
@@ -230,10 +235,40 @@ class ConfigView(QWidget):
         row.addStretch()
         card.body.addLayout(row)
 
+        # Lightweight partial re-fetch: only patches the `comments` field on
+        # each channel's already-stored checkpoint rows (see
+        # tools.comments_refresh) instead of a full re-scan — for a folder
+        # whose channels were fetched before that field existed, or whose
+        # comment counts have just gone stale.
+        comments_row = QHBoxLayout()
+        self.comments_refresh_lbl = QLabel(self.tr_("folder_comments_refresh_label"))
+        comments_row.addWidget(self.comments_refresh_lbl)
+        self.comments_folder_combo = QComboBox()
+        comments_row.addWidget(self.comments_folder_combo, 1)
+        self.refresh_comments_btn = QPushButton(self.tr_("folder_comments_refresh_btn"))
+        self.refresh_comments_btn.setToolTip(self.tr_("folder_comments_refresh_hint"))
+        self.refresh_comments_btn.clicked.connect(self._on_refresh_comments_clicked)
+        comments_row.addWidget(self.refresh_comments_btn)
+        card.body.addLayout(comments_row)
+
         self.refresh_folders_list()
         return card
 
     def refresh_folders_list(self) -> None:
+        current_folder_id = self.comments_folder_combo.currentData()
+        self.comments_folder_combo.blockSignals(True)
+        self.comments_folder_combo.clear()
+        for folder in self.folder_store.list_folders():
+            self.comments_folder_combo.addItem(folder["name"], folder["id"])
+        if self.comments_folder_combo.count():
+            idx = self.comments_folder_combo.findData(current_folder_id)
+            self.comments_folder_combo.setCurrentIndex(idx if idx >= 0 else 0)
+        self.comments_folder_combo.blockSignals(False)
+        has_folders = self.comments_folder_combo.count() > 0
+        self.comments_refresh_lbl.setVisible(has_folders)
+        self.comments_folder_combo.setVisible(has_folders)
+        self.refresh_comments_btn.setVisible(has_folders)
+
         folders = self.folder_store.list_folders()
         if not folders:
             self.folders_list_lbl.setText(self.tr_("folder_list_empty"))
@@ -295,6 +330,9 @@ class ConfigView(QWidget):
         self.folders_card_ref.title_lbl.setText(self.tr_("folder_section_title"))
         self.folders_help_lbl.setText(self.tr_("folder_manage_help"))
         self.folders_manage_btn.setText(self.tr_("folder_manage"))
+        self.comments_refresh_lbl.setText(self.tr_("folder_comments_refresh_label"))
+        self.refresh_comments_btn.setText(self.tr_("folder_comments_refresh_btn"))
+        self.refresh_comments_btn.setToolTip(self.tr_("folder_comments_refresh_hint"))
         self.refresh_folders_list()
 
     # ------------------------------------------------------ field helpers
@@ -453,6 +491,7 @@ class ConfigView(QWidget):
         self.worker.sig_done.connect(self._on_fetch_done)
 
         self.fetch_btn.setEnabled(False)
+        self.refresh_comments_btn.setEnabled(False)
         self.stop_btn.setEnabled(True)
         self.progress.setRange(0, 0)
         self.worker.start()
@@ -490,6 +529,7 @@ class ConfigView(QWidget):
 
     def _on_fetch_done(self, ok: bool, msg: str) -> None:
         self.fetch_btn.setEnabled(True)
+        self.refresh_comments_btn.setEnabled(True)
         self.stop_btn.setEnabled(False)
         payload = None
         if ok:
@@ -509,5 +549,55 @@ class ConfigView(QWidget):
                                       scanned=payload.get("scanned", 0)))
             self.channel_edit.clear()
             self.channel_fetched.emit(payload)
+        else:
+            self._append_log(self.tr_("done_fail", msg=msg))
+
+    # --------------------------------------------------- refresh comments
+    def _on_refresh_comments_clicked(self) -> None:
+        folder_id = self.comments_folder_combo.currentData()
+        if not folder_id:
+            return
+        keys = [k for k, fid in self.folder_store.assignments.items() if fid == folder_id]
+        if not keys:
+            QMessageBox.information(self, self.tr_("app_title"),
+                                    self.tr_("folder_stat_empty_channels"))
+            return
+        self._store_fields()
+        if not self._has_conn():
+            QMessageBox.warning(self, self.tr_("app_title"), self.tr_("missing_conn"))
+            return
+        if self.is_running():
+            QMessageBox.warning(self, self.tr_("app_title"), self.tr_("worker_running"))
+            return
+
+        self.log_view.clear()
+        conn = {
+            "api_id": self.cfg.get("API_ID").strip(),
+            "api_hash": self.cfg.get("API_HASH").strip(),
+            "phone": self.cfg.get("PHONE_NUMBER").strip(),
+            "session": self.cfg.session_path(),
+        }
+        self.worker = ToolWorker(run_comments_refresh, {"keys": keys}, conn, parent=self)
+        self.worker.sig_log.connect(self._append_log)
+        self.worker.sig_progress.connect(self._on_progress)
+        self.worker.sig_ask.connect(self._on_ask)
+        self.worker.sig_done.connect(self._on_refresh_comments_done)
+
+        self.fetch_btn.setEnabled(False)
+        self.refresh_comments_btn.setEnabled(False)
+        self.stop_btn.setEnabled(True)
+        self.progress.setRange(0, 0)
+        self.worker.start()
+
+    def _on_refresh_comments_done(self, ok: bool, msg: str) -> None:
+        self.fetch_btn.setEnabled(True)
+        self.refresh_comments_btn.setEnabled(True)
+        self.stop_btn.setEnabled(False)
+        if self.progress.maximum() == 0:
+            self.progress.setRange(0, 1)
+            self.progress.setValue(1 if ok else 0)
+        self.worker = None
+        if ok:
+            self.checkpoints_changed.emit()
         else:
             self._append_log(self.tr_("done_fail", msg=msg))

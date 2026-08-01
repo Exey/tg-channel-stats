@@ -470,10 +470,17 @@ class FolderStatView(QWidget):
     # ------------------------------------------------------- period picker
     @staticmethod
     def _clear_layout(layout) -> None:
+        # hide() first — takeAt() only unmanages a widget from the layout,
+        # it doesn't hide it, and deleteLater() doesn't actually destroy it
+        # until the next event-loop pass, so a rapid double-rebuild (the
+        # constructor's initial setChecked(True) followed by main_window's
+        # first refresh(), both before the event loop is re-entered) can
+        # leave the old buttons visibly stacked under the new ones.
         while layout.count():
             item = layout.takeAt(0)
             w = item.widget()
             if w is not None:
+                w.hide()
                 w.deleteLater()
                 continue
             sub = item.layout()

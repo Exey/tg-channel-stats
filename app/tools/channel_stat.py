@@ -52,6 +52,29 @@ def _reaction_total(msg) -> int:
     return sum(int(getattr(rc, "count", 0) or 0) for rc in reactions.results)
 
 
+def _comment_total(msg) -> int:
+    """Comment count from a channel post's linked discussion thread, if
+    any (Telethon's Message.replies.replies) — 0 for posts with no
+    comments or no linked discussion group."""
+    replies = getattr(msg, "replies", None)
+    return int(getattr(replies, "replies", 0) or 0)
+
+
+def _media_type(msg) -> str:
+    """"photo" | "video" | "video_note" (round/circle video) | "" — used
+    by the High-Quality Posts view to pick a placeholder icon before a
+    thumbnail is fetched (see app.tools.media_fetch). Checked in this
+    order since a round video is technically also a "video" in Telethon's
+    eyes, and needs to be told apart from a regular one."""
+    if getattr(msg, "video_note", None) is not None:
+        return "video_note"
+    if getattr(msg, "video", None) is not None:
+        return "video"
+    if getattr(msg, "photo", None) is not None:
+        return "photo"
+    return ""
+
+
 def _preview(text: str, limit: int = 140) -> str:
     text = " ".join((text or "").split())
     return text if len(text) <= limit else text[: limit - 1] + "…"
@@ -328,6 +351,7 @@ async def run_channel_stat(client, p: dict, ctx) -> str:
         views = int(getattr(msg, "views", 0) or 0)
         reactions = _reaction_total(msg)
         forwards = int(getattr(msg, "forwards", 0) or 0)
+        comments = _comment_total(msg)
 
         if gid is not None and gid == current_gid:
             # Same album — merge into the row being built (see channel_top).
@@ -336,6 +360,7 @@ async def run_channel_stat(client, p: dict, ctx) -> str:
             current["views"] = max(current["views"], views)
             current["reactions"] = max(current["reactions"], reactions)
             current["forwards"] = max(current["forwards"], forwards)
+            current["comments"] = max(current["comments"], comments)
             if not current["text"] and text:
                 current["text"] = text
                 current["full_text"] = full_text
@@ -352,6 +377,11 @@ async def run_channel_stat(client, p: dict, ctx) -> str:
                 "views": views,
                 "reactions": reactions,
                 "forwards": forwards,
+                "comments": comments,
+                # From the anchor message only, like date/ts — an album's
+                # other members aren't re-checked, matching the "cover"
+                # item a viewer would actually see first.
+                "media_type": _media_type(msg),
                 "public": None,
             }
             current_gid = gid
