@@ -3,9 +3,14 @@
 relative to that post's own views, not raw view count. Click a card to
 open the post on Telegram.
 
-    ERV% = (forwards × 1.0 + comments × 0.7 + reactions × 0.0075) / views × 100
+    comments      = min(comments, 100)   # capped — see below
+    reaction_wt   = min(reactions, 1000) × 0.045
+                  + max(0, min(reactions, 10000) − 1000) × 0.005
+    viral_excess  = max(0, views − channel's avg_views)
+    ERV% = (forwards × 1.0 + comments × 0.25 + reaction_wt
+            + viral_excess × 0.2) / views × 100
     raw  = ERV% × 100
-    gauge = raw / (raw + K) × 100 → onto the 0-1000 gauge, K=51 (this
+    gauge = raw / (raw + K) × 100 → onto the 0-1000 gauge, K=580 (this
             app's real per-post median raw score) so a typical post lands
             near the middle — a hard clamp would flatten most real posts
             at the ceiling (see the equivalent problem worked through for
@@ -13,22 +18,36 @@ open the post on Telegram.
 
 Numerator terms are weighted by how much each actually signals quality,
 most to least: forwards (a deliberate, costly share) first, then comments
-(real engagement, but cheaper to leave than a share), then reactions
-weighted lowest — down to just 0.0075, a tenth of what it was before (some
-posts have anomalously high reaction counts relative to their own views —
-Telegram's view count can lag behind reactions, or reactions can accumulate
-from contexts views don't capture — so left at a higher weight they'd
-dominate the score more than they should). Views stay the ratio's
-denominator throughout, not a weighted term. This is a plain per-post
-ratio either way, so it doesn't reward a post just for
-being the most-viewed one (a channel's biggest post is often just the one
+(real engagement, but cheaper to leave than a share, and capped at 100 —
+past that a post is clearly getting real discussion either way, and an
+outlier discussion thread of 500+ comments shouldn't just keep dragging the
+score up further), then reactions weighted lowest and in two brackets
+instead of one flat rate — the first 1000 reactions count at 0.045 each,
+anything from there up to 10 000 counts at only 0.005 each, and beyond
+10 000 nothing more is added at all (some posts have anomalously high
+reaction counts relative to their own views — Telegram's view count can lag
+behind reactions, or reactions can accumulate from contexts views don't
+capture — so a flat weight would let them dominate the score more than they
+should; tapering in brackets keeps a post's first reactions meaningful
+without letting a runaway count keep adding weight forever). A post that
+beat its own channel's average views also earns a
+"viral excess" bonus (floored at 0, so an under-average post gets neither
+bonus nor penalty) — weighted at 0.2, but since it's still divided by the
+post's own views afterward, this term alone can only ever contribute 0-20%
+of ERV%, so a breakout post gets rewarded without swamping the engagement
+terms above. Views themselves stay the ratio's denominator throughout, not
+a directly-weighted term. This is still a plain per-post ratio, so it
+doesn't reward a post just for being the most-viewed one on raw terms — the
+viral-excess bonus only rewards *beating its own channel's usual reach*,
+which is a different thing (a channel's biggest post is often just the one
 that happened to reach the widest audience, not necessarily the best
-content). An earlier version of this view scored whole *channels* using a
+content — but a post that's unusually large *for that channel* really is
+signal). An earlier version of this view scored whole *channels* using a
 channel-level "Virality Index" (max_views / avg_views, trimmed/capped to
-tame single-post outliers) — none of that applies once you're scoring
-individual posts directly: there's no "average" to compare a lone post
-against, and no outlier-in-a-mean problem when there's nothing being
-averaged.
+tame single-post outliers) that was dropped once this view switched to
+scoring individual posts — the viral-excess term above is a deliberate,
+narrower reintroduction of that same avg_views comparison at the per-post
+level, not a return to scoring whole channels.
 
 Posts come from each channel's checkpoint `rows` — the stored top-N sample
 (see folder_stat_view's module docstring), not a fresh fetch — filtered to
@@ -159,6 +178,13 @@ def _channel_ref(ch: dict) -> str:
     return ch.get("channel") or ch.get("username") or ch.get("key", "")
 
 
+def _channel_avg_views(ch: dict) -> float:
+    """This channel's average views (checkpoint `stats.avg_views`, computed
+    by channel_stat.py over its whole scanned history) — 0 for a checkpoint
+    that predates that field or never settled a value."""
+    return float(ch.get("stats", {}).get("avg_views", 0) or 0)
+
+
 # Numerator terms are weighted by how much each actually signals content
 # quality, most to least: a share (forward) is a deliberate, costly
 # endorsement, so it counts most; a comment is real engagement but cheaper
@@ -167,27 +193,57 @@ def _channel_ref(ch: dict) -> str:
 # relative to their own views). Views stay the ratio's *denominator*, not a
 # weighted term — every term above is already measured relative to them.
 _FORWARD_WEIGHT = 1.0
-_COMMENT_WEIGHT = 0.7
-_REACTION_WEIGHT = 0.0075   # 10% of the previous 0.075 — reactions count even less
+_COMMENT_WEIGHT = 0.25
+_COMMENT_CAP = 100   # comments beyond this count the same as exactly 100
+
+# Reactions are weighted in two brackets instead of one flat rate, so a
+# post's first 1000 reactions still count meaningfully but each one beyond
+# that (up to 10 000) counts for much less — and beyond 10 000, nothing
+# more is added at all. Same anomalous-reaction-count problem as the flat
+# weight this replaced (see module docstring), just tapered smoothly
+# instead of crushed uniformly.
+_REACTION_TIER1_CAP = 1000
+_REACTION_TIER1_WEIGHT = 0.045
+_REACTION_TIER2_CAP = 10_000
+_REACTION_TIER2_WEIGHT = 0.005
 
 
-def post_score_raw(row: dict) -> float:
-    """ERV% × 100 for one post — see module docstring."""
+def _reaction_weighted(reactions: int) -> float:
+    tier1 = min(reactions, _REACTION_TIER1_CAP) * _REACTION_TIER1_WEIGHT
+    tier2 = max(0, min(reactions, _REACTION_TIER2_CAP) - _REACTION_TIER1_CAP) * _REACTION_TIER2_WEIGHT
+    return tier1 + tier2
+
+# A post that pulled in more views than its own channel's average is
+# rewarded for that too — "views bigger than average" (floored at 0 so an
+# under-average post gets no bonus/penalty either way), weighted and folded
+# into the same numerator as the terms above. Because it's still divided by
+# the post's own views afterward, this term alone can only ever contribute
+# 0-20% of ERV% (it approaches, but never reaches, _VIRAL_WEIGHT × 100% as
+# views grows far past average) — it boosts a genuine breakout post without
+# letting it swamp the engagement-ratio terms.
+_VIRAL_WEIGHT = 0.2
+
+
+def post_score_raw(row: dict, avg_views: float) -> float:
+    """ERV% × 100 for one post — see module docstring. `avg_views` is that
+    post's own channel's average (checkpoint `stats.avg_views`)."""
     views = int(row.get("views", 0) or 0)
     if not views:
         return 0.0
     reactions = int(row.get("reactions", 0) or 0)
     forwards = int(row.get("forwards", 0) or 0)
-    comments = int(row.get("comments", 0) or 0)
-    erv_pct = (forwards * _FORWARD_WEIGHT + comments * _COMMENT_WEIGHT
-              + reactions * _REACTION_WEIGHT) / views * 100
+    comments = min(int(row.get("comments", 0) or 0), _COMMENT_CAP)
+    viral_excess = max(0.0, views - avg_views)
+    weighted = (forwards * _FORWARD_WEIGHT + comments * _COMMENT_WEIGHT
+               + _reaction_weighted(reactions) + viral_excess * _VIRAL_WEIGHT)
+    erv_pct = weighted / views * 100
     return erv_pct * 100
 
 
 # Real median raw post score across this app's checkpoints (post the
-# forward/comment/reaction weighting above) — chosen so a typical post
-# lands near the middle of the gauge.
-_POST_GAUGE_K = 51.0
+# forward/comment/reaction/viral weighting above) — chosen so a typical
+# post lands near the middle of the gauge.
+_POST_GAUGE_K = 580.0
 
 
 def _saturate(raw: float, k: float) -> float:
@@ -634,7 +690,7 @@ class ContentQualityView(QWidget):
                     if key != target_key:
                         continue
                 posts.append({"channel": ch, "row": row,
-                             "raw_score": post_score_raw(row)})
+                             "raw_score": post_score_raw(row, _channel_avg_views(ch))})
         posts.sort(key=lambda p: p["raw_score"], reverse=True)
         return posts[:MAX_POSTS_SHOWN]
 
@@ -664,8 +720,8 @@ class ContentQualityView(QWidget):
     def _on_channel_limit_changed(self, _index: int) -> None:
         self._rebuild_cards()
 
-    def _score_tooltip(self, label: str, row: dict, raw_score: float,
-                       gauge_value: float) -> str:
+    def _score_tooltip(self, label: str, row: dict, avg_views: float,
+                       raw_score: float, gauge_value: float) -> str:
         """Header (label + final score) plus the actual numbers plugged into
         post_score_raw's formula for this specific post — so hovering a card
         answers "why this score" without needing to open the module
@@ -673,16 +729,23 @@ class ContentQualityView(QWidget):
         views = int(row.get("views", 0) or 0)
         reactions = int(row.get("reactions", 0) or 0)
         forwards = int(row.get("forwards", 0) or 0)
-        comments = int(row.get("comments", 0) or 0)
+        comments = min(int(row.get("comments", 0) or 0), _COMMENT_CAP)
+        reaction_weighted = _reaction_weighted(reactions)
+        viral_excess = max(0.0, views - avg_views)
         weighted = (forwards * _FORWARD_WEIGHT + comments * _COMMENT_WEIGHT
-                   + reactions * _REACTION_WEIGHT)
+                   + reaction_weighted + viral_excess * _VIRAL_WEIGHT)
         erv_pct = (weighted / views * 100) if views else 0.0
         header = self.tr_("cqi_post_tooltip", label=label, score=f"{raw_score:.1f}")
         formula = self.tr_(
             "cqi_post_tooltip_formula",
             fwd_w=f"{_FORWARD_WEIGHT:g}", cmt_w=f"{_COMMENT_WEIGHT:g}",
-            rct_w=f"{_REACTION_WEIGHT:g}", forwards=fmt_int(forwards),
+            t1cap=fmt_int(_REACTION_TIER1_CAP), t1w=f"{_REACTION_TIER1_WEIGHT:g}",
+            t2cap=fmt_int(_REACTION_TIER2_CAP), t2w=f"{_REACTION_TIER2_WEIGHT:g}",
+            vrl_w=f"{_VIRAL_WEIGHT:g}", forwards=fmt_int(forwards),
             comments=fmt_int(comments), reactions=fmt_int(reactions),
+            reaction_weighted=f"{reaction_weighted:.2f}",
+            avg_views=fmt_int(round(avg_views)),
+            viral_excess=fmt_int(round(viral_excess)),
             views=fmt_int(views), erv=f"{erv_pct:.2f}", raw=f"{raw_score:.1f}",
             k=f"{_POST_GAUGE_K:g}", gauge=round(gauge_value))
         return f"{header}\n\n{formula}"
@@ -734,7 +797,8 @@ class ContentQualityView(QWidget):
             counts_text = (f"{fmt_int(views)}👁️ {fmt_int(comments)}💬\n"
                           f"{fmt_int(reactions)}❤️ {fmt_int(forwards)}🔄")
             gauge_value = post_gauge_value(entry["raw_score"])
-            tooltip = self._score_tooltip(label, row, entry["raw_score"], gauge_value)
+            tooltip = self._score_tooltip(label, row, _channel_avg_views(ch),
+                                          entry["raw_score"], gauge_value)
 
             card.set_data(label, thumb, placeholder, text, gauge_value, counts_text,
                          link, tooltip)

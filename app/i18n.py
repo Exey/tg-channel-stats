@@ -88,10 +88,19 @@ EN = {
                                       "then try again.",
     "cqi_empty_posts": "No posts found for this folder in this period.",
     "cqi_post_tooltip": "{label}\nScore: {score}",
-    "cqi_post_tooltip_formula": "ERV% = (forwards×{fwd_w} + comments×{cmt_w} "
-                                "+ reactions×{rct_w}) / views × 100\n"
+    "cqi_post_tooltip_formula": "reaction weight = min(reactions,{t1cap})×{t1w} "
+                                "+ max(0, min(reactions,{t2cap})−{t1cap})×{t2w}\n"
+                                "               = min({reactions},{t1cap})×{t1w} "
+                                "+ max(0, min({reactions},{t2cap})−{t1cap})×{t2w}\n"
+                                "               = {reaction_weighted}\n\n"
+                                "viral excess = max(0, views − channel avg) "
+                                "= max(0, {views} − {avg_views}) = {viral_excess}\n\n"
+                                "ERV% = (forwards×{fwd_w} + comments(≤100)×{cmt_w} "
+                                "+ reaction weight + viral excess×{vrl_w}) "
+                                "/ views × 100\n"
                                 "     = ({forwards}×{fwd_w} + {comments}×{cmt_w} "
-                                "+ {reactions}×{rct_w}) / {views} × 100\n"
+                                "+ {reaction_weighted} + {viral_excess}×{vrl_w}) "
+                                "/ {views} × 100\n"
                                 "     = {erv}%\n"
                                 "raw score = ERV% × 100 = {raw}\n"
                                 "gauge = raw / (raw + {k}) × 1000 = {gauge}",
@@ -362,10 +371,20 @@ RU = {
                                       "попробуйте снова.",
     "cqi_empty_posts": "Постов в этой папке за этот период не найдено.",
     "cqi_post_tooltip": "{label}\nОценка: {score}",
-    "cqi_post_tooltip_formula": "ERV% = (репосты×{fwd_w} + комментарии×{cmt_w} "
-                                "+ реакции×{rct_w}) / просмотры × 100\n"
+    "cqi_post_tooltip_formula": "вес реакций = min(реакции,{t1cap})×{t1w} "
+                                "+ max(0, min(реакции,{t2cap})−{t1cap})×{t2w}\n"
+                                "           = min({reactions},{t1cap})×{t1w} "
+                                "+ max(0, min({reactions},{t2cap})−{t1cap})×{t2w}\n"
+                                "           = {reaction_weighted}\n\n"
+                                "виральный избыток = max(0, просмотры − "
+                                "среднее по каналу) = max(0, {views} − "
+                                "{avg_views}) = {viral_excess}\n\n"
+                                "ERV% = (репосты×{fwd_w} + комментарии(≤100)×{cmt_w} "
+                                "+ вес реакций + виральный избыток×{vrl_w}) "
+                                "/ просмотры × 100\n"
                                 "     = ({forwards}×{fwd_w} + {comments}×{cmt_w} "
-                                "+ {reactions}×{rct_w}) / {views} × 100\n"
+                                "+ {reaction_weighted} + {viral_excess}×{vrl_w}) "
+                                "/ {views} × 100\n"
                                 "     = {erv}%\n"
                                 "сырой балл = ERV% × 100 = {raw}\n"
                                 "шкала = сырой / (сырой + {k}) × 1000 = {gauge}",
