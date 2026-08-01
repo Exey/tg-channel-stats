@@ -85,6 +85,25 @@ def _top_ids(rows: list[dict], key: str, n: int) -> set[int]:
     return {r["id"] for r in ranked[:n]}
 
 
+def _one_per_month_ids(rows: list[dict]) -> set[int]:
+    """Best (highest-viewed) post's id from *every* calendar month that has
+    any post at all. A flat "top-N most recent posts" cutoff (see
+    `_top_ids(rows, "ts", top_n)` below) can be entirely consumed by just
+    one or two unusually active recent months, silently dropping quieter
+    months right next to them from the pool — this guarantees no month is
+    ever completely unrepresented, regardless of how many posts its
+    neighbors have."""
+    by_month: dict[str, list[dict]] = {}
+    for r in rows:
+        label = (r.get("date") or "")[:7]
+        if len(label) == 7:
+            by_month.setdefault(label, []).append(r)
+    ids: set[int] = set()
+    for month_rows in by_month.values():
+        ids.add(max(month_rows, key=lambda r: r["views"])["id"])
+    return ids
+
+
 def _trimmed_mean_drop_top(values: list[int], drop_frac: float) -> float:
     """Mean after dropping the top `drop_frac` fraction of values (sorted
     ascending) — a true trimmed mean over the *whole* distribution, not
@@ -441,9 +460,23 @@ async def run_channel_stat(client, p: dict, ctx) -> str:
     }
 
     # -------- engagement pool (union of top-N by each metric) --------
+    # Also unions in the top-N most *recent* posts ("ts") and one post per
+    # calendar month, not just the top-N by engagement — a fresh post has
+    # barely had time to accumulate views/reactions/forwards, so on an
+    # active channel with a long history it will almost never rank in the
+    # engagement-based top-N, leaving the most recent weeks/months
+    # completely unrepresented in the pool. "ts" alone isn't quite enough
+    # either: a couple of unusually active recent months can consume the
+    # entire top-N-by-recency budget and still leave a quieter month right
+    # next to them with zero posts in the pool, which is where
+    # _one_per_month_ids comes in — see its docstring. The High-Quality
+    # Posts view, and the dashboard's "recent posts" row/Quality trend
+    # line, all read from this same pool — without both of these, they'd
+    # silently drop whichever recent months don't happen to stand out.
     pool_ids: set[int] = set()
-    for key in ("views", "reactions", "forwards"):
+    for key in ("views", "reactions", "forwards", "ts"):
         pool_ids |= _top_ids(rows, key, top_n)
+    pool_ids |= _one_per_month_ids(rows)
     pool = [r for r in rows if r["id"] in pool_ids]
     pool.sort(key=lambda r: r["views"], reverse=True)
 

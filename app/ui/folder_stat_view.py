@@ -30,7 +30,9 @@ from PySide6.QtWidgets import (
 )
 
 from ..folders import FolderStore
-from ..periods import period_key_label as _period_key_label
+from ..periods import (
+    YEAR_WINDOW_OPTIONS, period_key_label as _period_key_label, year_window_cutoff,
+)
 from ..store import ChannelStore
 from .dashboard_view import build_post_link, fmt_int
 from .widgets import SectionCard, hline
@@ -84,6 +86,8 @@ class FolderStatView(QWidget):
         self._period_mode = "season"
         self._selected_period_key: tuple | None = None
         self._period_btns: dict[tuple, QPushButton] = {}
+        self._year_window_key = "all"
+        self._year_btns: dict[str, QPushButton] = {}
         self._period_entries: list[dict] = []
         self._period_sort_col = 6   # Viral share, matching the previous fixed order
         self._period_sort_desc = True
@@ -187,14 +191,14 @@ class FolderStatView(QWidget):
         self.mode_month_btn = QPushButton(self.tr_("period_mode_month"))
         self.mode_month_btn.setObjectName("ghost")
         self.mode_month_btn.setCheckable(True)
-        self.mode_all_btn = QPushButton(self.tr_("period_mode_all"))
-        self.mode_all_btn.setObjectName("ghost")
-        self.mode_all_btn.setCheckable(True)
+        self.mode_year_btn = QPushButton(self.tr_("period_mode_year"))
+        self.mode_year_btn.setObjectName("ghost")
+        self.mode_year_btn.setCheckable(True)
         self._mode_btn_group = QButtonGroup(self)
         self._mode_btn_group.setExclusive(True)
         self._mode_btn_group.addButton(self.mode_season_btn)
         self._mode_btn_group.addButton(self.mode_month_btn)
-        self._mode_btn_group.addButton(self.mode_all_btn)
+        self._mode_btn_group.addButton(self.mode_year_btn)
 
         self.period_md_btn = QPushButton(self.tr_("save_md_button"))
         self.period_md_btn.clicked.connect(self._save_md)
@@ -227,13 +231,13 @@ class FolderStatView(QWidget):
         # wire the signal and set the default mode (which fires it once).
         self.mode_season_btn.toggled.connect(lambda checked: self._on_mode_toggled("season", checked))
         self.mode_month_btn.toggled.connect(lambda checked: self._on_mode_toggled("month", checked))
-        self.mode_all_btn.toggled.connect(lambda checked: self._on_mode_toggled("all", checked))
+        self.mode_year_btn.toggled.connect(lambda checked: self._on_mode_toggled("year", checked))
         self.mode_season_btn.setChecked(True)
 
         mode_row = QHBoxLayout()
         mode_row.addWidget(self.mode_season_btn)
         mode_row.addWidget(self.mode_month_btn)
-        mode_row.addWidget(self.mode_all_btn)
+        mode_row.addWidget(self.mode_year_btn)
         mode_row.addStretch()
         mode_row.addWidget(self.period_md_btn)
 
@@ -353,15 +357,19 @@ class FolderStatView(QWidget):
                 count = int(m.get("count", 0) or 0)
                 if not count:
                     continue
-                if mode == "all":
-                    # Everything collapses into a single bucket — there's
-                    # only ever one "All time" period, so no year/month key.
-                    key, label = ("all",), self.tr_("period_mode_all")
-                else:
-                    try:
-                        year, month = (int(x) for x in m.get("label", "").split("-"))
-                    except ValueError:
+                try:
+                    year, month = (int(x) for x in m.get("label", "").split("-"))
+                except ValueError:
+                    continue
+                if mode == "year":
+                    # Everything within the selected rolling window collapses
+                    # into a single bucket — month-granularity, since that's
+                    # all `distributions.monthly` can offer.
+                    cutoff = year_window_cutoff(self._year_window_days())
+                    if cutoff is not None and (year, month) < (cutoff.year, cutoff.month):
                         continue
+                    key, label = ("year", self._year_window_key), self._year_window_label()
+                else:
                     key, label = _period_key_label(year, month, mode)
                 b = buckets.setdefault(key, {
                     "label": label, "count": 0, "views": 0, "shares": 0,
@@ -548,20 +556,63 @@ class FolderStatView(QWidget):
         scroll.setFixedHeight(min(220, 46 * max(len(years), 1) + 10))
         self.picker_lay.addWidget(scroll)
 
+    def _year_window_days(self) -> int | None:
+        for key, _label_key, days in YEAR_WINDOW_OPTIONS:
+            if key == self._year_window_key:
+                return days
+        return None
+
+    def _year_window_label(self) -> str:
+        for key, label_key, _days in YEAR_WINDOW_OPTIONS:
+            if key == self._year_window_key:
+                return self.tr_(label_key)
+        return ""
+
+    def _build_year_picker(self) -> None:
+        row_widget = QWidget()
+        row_lay = QHBoxLayout(row_widget)
+        row_lay.setContentsMargins(0, 0, 0, 0)
+        row_lay.setSpacing(6)
+        self._year_btn_group = QButtonGroup(self)
+        self._year_btn_group.setExclusive(True)
+        self._year_btns = {}
+        for key, label_key, _days in YEAR_WINDOW_OPTIONS:
+            btn = QPushButton(self.tr_(label_key))
+            btn.setObjectName("ghost")
+            btn.setCheckable(True)
+            btn.setCursor(Qt.CursorShape.PointingHandCursor)
+            self._year_btn_group.addButton(btn)
+            btn.toggled.connect(lambda checked, k=key: self._on_year_window_toggled(k, checked))
+            self._year_btns[key] = btn
+            row_lay.addWidget(btn)
+        row_lay.addStretch()
+
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setWidget(row_widget)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        scroll.setFixedHeight(48)
+        self.picker_lay.addWidget(scroll)
+        self._year_btns[self._year_window_key].setChecked(True)
+
+    def _on_year_window_toggled(self, key: str, checked: bool) -> None:
+        if not checked:
+            return
+        self._year_window_key = key
+        self._selected_period_key = ("year", key)
+        self._rebuild_selected_period_table()
+
     def _rebuild_period_picker(self) -> None:
         self._clear_layout(self.picker_lay)
         self._period_btn_group = QButtonGroup(self)
         self._period_btn_group.setExclusive(True)
         self._period_btns = {}
-
-        if self._period_mode == "all":
-            # Only one possible period, so there's nothing to pick — go
-            # straight to the aggregated table.
-            self.picker_container.setVisible(False)
-            self._selected_period_key = ("all",)
-            self._rebuild_selected_period_table()
-            return
         self.picker_container.setVisible(True)
+
+        if self._period_mode == "year":
+            self._build_year_picker()  # its own setChecked(True) triggers the rebuild
+            return
 
         keys_labels = self._collect_all_period_keys(self._period_mode)
         if self._period_mode == "season":
@@ -734,7 +785,10 @@ class FolderStatView(QWidget):
         self.period_hint_lbl.setText(self.tr_("folder_stat_period_hint"))
         self.mode_season_btn.setText(self.tr_("period_mode_season"))
         self.mode_month_btn.setText(self.tr_("period_mode_month"))
-        self.mode_all_btn.setText(self.tr_("period_mode_all"))
+        self.mode_year_btn.setText(self.tr_("period_mode_year"))
+        for key, btn in self._year_btns.items():
+            label_key = next(lk for k, lk, _d in YEAR_WINDOW_OPTIONS if k == key)
+            btn.setText(self.tr_(label_key))
         self.period_md_btn.setText(self.tr_("save_md_button"))
         self.period_empty_lbl.setText(self.tr_("folder_stat_period_empty"))
         self.period_table.setHorizontalHeaderLabels([

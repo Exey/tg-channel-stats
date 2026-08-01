@@ -1,7 +1,10 @@
 """Month/season period-key helpers shared by the dashboard trend chart and
 the Folder Stats view, so both group `distributions.monthly` entries into
-the same season buckets."""
+the same season buckets. Also the "Year mode" rolling-window options shared
+by Folder Stats and High-Quality Posts (see YEAR_WINDOW_OPTIONS)."""
 from __future__ import annotations
+
+from datetime import datetime, timedelta, timezone
 
 SEASON_BY_MONTH = {
     12: "Winter", 1: "Winter", 2: "Winter",
@@ -24,3 +27,24 @@ def period_key_label(year: int, month: int, mode: str) -> tuple[tuple, str]:
             label = f"{season} {year}"
         return (year, SEASON_ORDER[season]), label
     return (year, month), f"{year:04d}-{month:02d}"
+
+
+# "Year mode" sub-options: (key, i18n label key, rolling window in days —
+# None for "All Fetched Time", i.e. no cutoff at all). A flat rolling
+# window from today, not a calendar year — "Last Year" means the last 365
+# days, not e.g. all of 2026.
+YEAR_WINDOW_OPTIONS = [
+    ("half", "period_year_half", 182),
+    ("1y", "period_year_1y", 365),
+    ("1.5y", "period_year_1_5y", 547),
+    ("2y", "period_year_2y", 730),
+    ("all", "period_year_all", None),
+]
+
+
+def year_window_cutoff(window_days: int | None) -> datetime | None:
+    """UTC cutoff datetime for a Year-mode window's day count, or None for
+    no cutoff (the "All Fetched Time" option)."""
+    if window_days is None:
+        return None
+    return datetime.now(timezone.utc) - timedelta(days=window_days)

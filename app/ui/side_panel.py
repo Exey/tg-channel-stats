@@ -42,9 +42,13 @@ class SidePanel(QFrame):
         self.setObjectName("sidebar")
         self.setFixedWidth(256)
         self.compare_mode = False
-        self._compare_keys: list[str] = []
         self.compare_charts_mode = False
-        self._compare_charts_keys: list[str] = []
+        # Shared by both multi-select modes on purpose: switching from
+        # Compare to Compare Charts (or back) is meant to carry the current
+        # channel selection over, not reset it — see _toggle_compare_mode/
+        # _toggle_compare_charts_mode.
+        self._selected_keys: list[str] = []
+        self._switching_modes = False
         self.folder_store = folder_store
 
         root = QVBoxLayout(self)
@@ -163,8 +167,7 @@ class SidePanel(QFrame):
         for k in stale:
             self.folder_store.set_channel_folder(k, None)
 
-        self._compare_keys.clear()
-        self._compare_charts_keys.clear()
+        self._selected_keys.clear()
         for ch in channels:
             username = ch.get("username") or ""
             label = f"@{username}" if username else (ch.get("title") or ch.get("key", "?"))
@@ -229,61 +232,77 @@ class SidePanel(QFrame):
         self.folders_changed.emit()
 
     # ------------------------------------------------------------- compare
-    def _set_channel_multiselect(self, on: bool) -> None:
-        self.group.setExclusive(not on)
-        for btn in self._channel_btns.values():
-            btn.setChecked(False)
+    def _sync_checked_buttons(self, keys: list[str]) -> None:
+        key_set = set(keys)
+        for key, btn in self._channel_btns.items():
+            btn.setChecked(key in key_set)
 
     def _toggle_compare_mode(self, on: bool) -> None:
-        if on and self.compare_charts_mode:
-            self.compare_charts_btn.setChecked(False)  # mutually exclusive multi-select modes
         self.compare_mode = on
-        self._compare_keys.clear()
-        self._set_channel_multiselect(self.compare_mode or self.compare_charts_mode)
+        if on and self.compare_charts_mode:
+            # Mutually exclusive multi-select modes, but switching between
+            # them is meant to carry `_selected_keys` over — the guard stops
+            # the nested _toggle_compare_charts_mode(False) call this
+            # triggers from clearing the selection or emitting "mode off"
+            # (which would navigate away, e.g. back to Config) on its way
+            # out, since we're headed straight into Compare instead.
+            self._switching_modes = True
+            self.compare_charts_btn.setChecked(False)
+            self._switching_modes = False
+        self.group.setExclusive(not (self.compare_mode or self.compare_charts_mode))
         if on:
             self.config_btn.setChecked(False)
-        else:
+            self._sync_checked_buttons(self._selected_keys)
+            if len(self._selected_keys) >= 2:
+                self.compare_requested.emit(list(self._selected_keys))
+        elif not self._switching_modes:
+            self._selected_keys.clear()
+            self._sync_checked_buttons(self._selected_keys)
             self.compare_mode_off.emit()
 
     def _toggle_compare_charts_mode(self, on: bool) -> None:
-        if on and self.compare_mode:
-            self.compare_btn.setChecked(False)  # mutually exclusive multi-select modes
         self.compare_charts_mode = on
-        self._compare_charts_keys.clear()
-        self._set_channel_multiselect(self.compare_mode or self.compare_charts_mode)
+        if on and self.compare_mode:
+            self._switching_modes = True
+            self.compare_btn.setChecked(False)  # mutually exclusive — see _toggle_compare_mode
+            self._switching_modes = False
+        self.group.setExclusive(not (self.compare_mode or self.compare_charts_mode))
         if on:
             self.config_btn.setChecked(False)
             self.folder_stat_btn.setChecked(False)
             self.content_quality_btn.setChecked(False)
-            self.compare_charts_selected.emit([])
-        else:
+            self._sync_checked_buttons(self._selected_keys)
+            self.compare_charts_selected.emit(list(self._selected_keys))
+        elif not self._switching_modes:
+            self._selected_keys.clear()
+            self._sync_checked_buttons(self._selected_keys)
             self.compare_charts_mode_off.emit()
 
     def _on_channel_clicked(self, key: str) -> None:
         if self.compare_charts_mode:
             btn = self._channel_btns[key]
             if btn.isChecked():
-                if len(self._compare_charts_keys) >= MAX_COMPARE:
-                    stale = self._compare_charts_keys.pop(0)
+                if len(self._selected_keys) >= MAX_COMPARE:
+                    stale = self._selected_keys.pop(0)
                     self._channel_btns[stale].setChecked(False)
-                self._compare_charts_keys.append(key)
-            elif key in self._compare_charts_keys:
-                self._compare_charts_keys.remove(key)
-            self.compare_charts_selected.emit(list(self._compare_charts_keys))
+                self._selected_keys.append(key)
+            elif key in self._selected_keys:
+                self._selected_keys.remove(key)
+            self.compare_charts_selected.emit(list(self._selected_keys))
             return
         if not self.compare_mode:
             self.channel_selected.emit(key)
             return
         btn = self._channel_btns[key]
         if btn.isChecked():
-            if len(self._compare_keys) >= MAX_COMPARE:
-                stale = self._compare_keys.pop(0)
+            if len(self._selected_keys) >= MAX_COMPARE:
+                stale = self._selected_keys.pop(0)
                 self._channel_btns[stale].setChecked(False)
-            self._compare_keys.append(key)
-        elif key in self._compare_keys:
-            self._compare_keys.remove(key)
-        if len(self._compare_keys) >= 2:
-            self.compare_requested.emit(list(self._compare_keys))
+            self._selected_keys.append(key)
+        elif key in self._selected_keys:
+            self._selected_keys.remove(key)
+        if len(self._selected_keys) >= 2:
+            self.compare_requested.emit(list(self._selected_keys))
 
     # ------------------------------------------------------------- select
     def select_config(self) -> None:

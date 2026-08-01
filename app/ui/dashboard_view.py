@@ -12,27 +12,37 @@ import re
 from datetime import datetime
 
 from PySide6.QtCore import Qt, QUrl
-from PySide6.QtGui import QDesktopServices, QIcon
+from PySide6.QtGui import QDesktopServices, QIcon, QPixmap
 from PySide6.QtWidgets import (
     QAbstractItemView, QApplication, QButtonGroup, QDialog, QDialogButtonBox,
-    QFileDialog, QGridLayout, QHBoxLayout, QHeaderView, QLabel, QMenu,
+    QFileDialog, QFrame, QGridLayout, QHBoxLayout, QHeaderView, QLabel, QMenu,
     QMessageBox, QPlainTextEdit, QPushButton, QScrollArea, QTableWidget,
     QTableWidgetItem, QVBoxLayout, QWidget,
 )
 
 from PySide6.QtCore import Signal
 
+from ..config import Config
 from ..folders import FolderStore
+from ..media_cache import thumbnail_path
 from ..periods import period_key_label
+from ..scoring import post_gauge_value, post_score_raw, score_tooltip
+from ..tools.media_fetch import run_thumbnail_cache
+from ..worker import ToolWorker
 from .charts import BarChart, MultiLineChart
 from .folder_dialog import FolderManagerDialog
 from .theme import COLORS
-from .widgets import Card, ChartCard, SectionCard, StatCard, folder_icon, hline
+from .widgets import (
+    Card, ChartCard, PostCard, SectionCard, StatCard, elide_to_lines, folder_icon, hline,
+    POST_CARD_HEIGHT, POST_CARD_PLACEHOLDERS, POST_CARD_TEXT_LINES,
+    POST_CARD_TEXT_PIXEL_SIZE, POST_CARD_TEXT_WIDTH, POST_CARD_THUMB_HEIGHT, POST_CARD_WIDTH,
+)
 
 MONTHS_SHORT = ["", "Jan", "Feb", "Mar", "Apr", "May", "Jun",
                 "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
 
 LAST_FULL_YEAR = datetime.now().year - 1
+RECENT_POSTS_COUNT = 50
 
 # card key -> i18n key for an explanatory tooltip (same cards/logic as compare mode).
 _CARD_TOOLTIPS = {
@@ -153,10 +163,11 @@ class DashboardView(QWidget):
     # table column index -> row-dict key (None = not sortable)
     _SORT_KEYS = {0: "ts", 2: "views", 3: "reactions", 4: "forwards", 5: "public"}
 
-    def __init__(self, i18n, folder_store: FolderStore, parent=None) -> None:
+    def __init__(self, i18n, folder_store: FolderStore, cfg: Config, parent=None) -> None:
         super().__init__(parent)
         self.i18n = i18n
         self.folder_store = folder_store
+        self.cfg = cfg
         self._data: dict = {}
         self._rows: list[dict] = []
         self._channel_text = ""
@@ -164,6 +175,7 @@ class DashboardView(QWidget):
         self._sort_col = 2
         self._sort_desc = True
         self._trend_mode = "month"
+        self._media_worker: ToolWorker | None = None
         self._build_ui()
 
     def tr_(self, key: str, **kw) -> str:
@@ -227,32 +239,23 @@ class DashboardView(QWidget):
         scroll.setWidget(body)
         outer.addWidget(scroll, 1)
 
-        self._build_stat_cards()
-        self._build_top_viral_table()
+        self._build_top_stat_cards()
         self._build_trend_chart()
-        self._build_charts()
+        self._build_recent_posts_row()
+        self._build_secondary_stat_cards()
+        self._build_top_viral_table()
+        self._build_hour_weekday_charts()
         self._build_table()
 
-    def _build_stat_cards(self) -> None:
+    def _add_stat_card_grid(self, specs: list[tuple[str, str]]) -> None:
+        """Shared by _build_top_stat_cards/_build_secondary_stat_cards — one
+        row of up to 4 StatCards each. A key can repeat across the two
+        groups (e.g. "avg_views"/"avg_views2" both show the channel's
+        average views — the top row is the at-a-glance summary, the second
+        row is the fuller metrics breakdown, and it's useful in both)."""
         grid = QGridLayout()
         grid.setHorizontalSpacing(18)
         grid.setVerticalSpacing(18)
-        self._cards: dict[str, StatCard] = {}
-        specs = [
-            ("members", "stat_members"),
-            ("total_posts", "stat_total_posts"),
-            ("avg_views", "stat_avg_views"),
-            ("max_views", "stat_max_views"),
-            ("posts_per_day", "stat_posts_per_day"),
-            ("avg_reactions", "stat_avg_reactions"),
-            ("avg_reposts", "stat_avg_reposts"),
-            ("max_reposts", "stat_max_reposts"),
-            ("err_pct", "stat_err_pct"),
-            ("views_last_year", "cmp_view_repost_year"),
-            ("erv_pct", "cmp_erv_pct"),
-            ("virality_index", "cmp_virality_index"),
-            ("viral_post_share", "cmp_viral_share"),
-        ]
         for i, (key, title_key) in enumerate(specs):
             accent = COLORS["accent"] if key != "total_posts" else COLORS["activity"]
             card = StatCard(self._metric_title(key, title_key), accent=accent)
@@ -263,6 +266,149 @@ class DashboardView(QWidget):
         for col in range(4):
             grid.setColumnStretch(col, 1)
         self.body.addLayout(grid)
+
+    def _build_top_stat_cards(self) -> None:
+        self._cards: dict[str, StatCard] = {}
+        self._add_stat_card_grid([
+            ("members", "stat_members"),
+            ("total_posts", "stat_total_posts"),
+            ("posts_per_day", "stat_posts_per_day"),
+            ("avg_views", "stat_avg_views"),
+        ])
+
+    def _build_secondary_stat_cards(self) -> None:
+        self._add_stat_card_grid([
+            ("views_last_year", "cmp_view_repost_year"),
+            ("err_pct", "stat_err_pct"),
+            ("erv_pct", "cmp_erv_pct"),
+            ("virality_index", "cmp_virality_index"),
+            ("viral_post_share", "cmp_viral_share"),
+            ("avg_views2", "stat_avg_views"),
+            ("avg_reposts", "stat_avg_reposts"),
+            ("avg_reactions", "stat_avg_reactions"),
+        ])
+
+    def _build_recent_posts_row(self) -> None:
+        """Horizontal-scrolling row of the RECENT_POSTS_COUNT most recent
+        posts, using the same PostCard (thumbnail/placeholder + quality
+        gauge + counts) as the High-Quality Posts view — see app.ui.widgets
+        and app.scoring. Drawn from self._rows, the stored top-N pool (see
+        channel_stat.py's module docstring), not the channel's full
+        history, so on a channel that posts more often than its pool
+        retains, this is "most recent posts *that are still in the pool*"
+        rather than literally the last N ever published — same caveat the
+        Top Viral table below already has."""
+        self.recent_posts_card = SectionCard(self.tr_("dash_recent_posts_title"))
+        fetch_row = QHBoxLayout()
+        fetch_row.addStretch(1)
+        self.fetch_media_btn = QPushButton(self.tr_("cqi_fetch_media"))
+        self.fetch_media_btn.setToolTip(self.tr_("cqi_fetch_media_hint"))
+        self.fetch_media_btn.clicked.connect(self._on_fetch_media_clicked)
+        fetch_row.addWidget(self.fetch_media_btn)
+        self.recent_posts_card.body.addLayout(fetch_row)
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.Shape.NoFrame)
+        scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        scroll.setFixedHeight(POST_CARD_HEIGHT + 16)
+        holder = QWidget()
+        self.recent_posts_lay = QHBoxLayout(holder)
+        self.recent_posts_lay.setContentsMargins(0, 2, 0, 2)
+        self.recent_posts_lay.setSpacing(14)
+        scroll.setWidget(holder)
+        self.recent_posts_card.body.addWidget(scroll)
+        self.body.addWidget(self.recent_posts_card)
+
+    def _rebuild_recent_posts(self) -> None:
+        for i in reversed(range(self.recent_posts_lay.count())):
+            item = self.recent_posts_lay.takeAt(i)
+            w = item.widget()
+            if w is not None:
+                w.hide()
+                w.deleteLater()
+
+        avg_views = self._data.get("stats", {}).get("avg_views", 0) or 0
+        rows = sorted(self._rows, key=lambda r: r.get("ts", 0), reverse=True)[:RECENT_POSTS_COUNT]
+
+        for row in rows:
+            card = PostCard()
+            raw_score = post_score_raw(row, avg_views)
+            gauge_value = post_gauge_value(raw_score)
+            date_label = self._fmt_date(row.get("date", ""))
+            text = elide_to_lines(row.get("text") or "", POST_CARD_TEXT_WIDTH,
+                                  POST_CARD_TEXT_LINES, POST_CARD_TEXT_PIXEL_SIZE)
+            link = build_post_link(self._channel_text, row.get("id", 0))
+
+            thumb_path = thumbnail_path(self._channel_text, row.get("id", 0))
+            thumb = None
+            if thumb_path.exists():
+                pix = QPixmap(str(thumb_path))
+                if not pix.isNull():
+                    thumb = pix.scaled(
+                        POST_CARD_WIDTH - 20, POST_CARD_THUMB_HEIGHT,
+                        Qt.AspectRatioMode.KeepAspectRatio,
+                        Qt.TransformationMode.SmoothTransformation)
+            placeholder = POST_CARD_PLACEHOLDERS.get(row.get("media_type") or "", "")
+
+            views = int(row.get("views", 0) or 0)
+            reactions = int(row.get("reactions", 0) or 0)
+            forwards = int(row.get("forwards", 0) or 0)
+            comments = int(row.get("comments", 0) or 0)
+            counts_text = (f"{fmt_int(views)}👁️ {fmt_int(comments)}💬\n"
+                          f"{fmt_int(reactions)}❤️ {fmt_int(forwards)}🔄")
+            tooltip = score_tooltip(self.tr_, date_label, row, avg_views,
+                                    raw_score, gauge_value, fmt_int)
+
+            card.set_data(date_label, thumb, placeholder, text, gauge_value,
+                         counts_text, link, tooltip)
+            self.recent_posts_lay.addWidget(card)
+        self.recent_posts_lay.addStretch(1)
+
+    # ------------------------------------------------------- fetch media
+    def _on_fetch_media_clicked(self) -> None:
+        """Same on-demand thumbnail fetch as High-Quality Posts (see
+        app.tools.media_fetch) — just for the cards shown above, and
+        without that view's FloodWait status line."""
+        rows = sorted(self._rows, key=lambda r: r.get("ts", 0), reverse=True)[:RECENT_POSTS_COUNT]
+        if not rows or self._media_worker is not None:
+            return
+        conn = {
+            "api_id": self.cfg.get("API_ID").strip(),
+            "api_hash": self.cfg.get("API_HASH").strip(),
+            "phone": self.cfg.get("PHONE_NUMBER").strip(),
+            "session": self.cfg.session_path(),
+        }
+        if not conn["api_id"] or not conn["api_hash"]:
+            QMessageBox.information(self, self.tr_("app_title"),
+                                    self.tr_("cqi_fetch_media_need_login"))
+            return
+
+        posts = [{"channel": self._channel_text, "id": r.get("id", 0),
+                 "ids": r.get("ids") or [r.get("id", 0)]} for r in rows]
+        self.fetch_media_btn.setEnabled(False)
+        self.fetch_media_btn.setText(self.tr_("cqi_fetch_media_running"))
+        self._media_worker = ToolWorker(run_thumbnail_cache, {"posts": posts}, conn, parent=self)
+        self._media_worker.sig_ask.connect(self._on_media_ask)
+        self._media_worker.sig_done.connect(self._on_fetch_media_done)
+        self._media_worker.start()
+
+    def _on_media_ask(self, _kind: str, _prompt: str) -> None:
+        # Same assumption as High-Quality Posts: this button relies on the
+        # session already used for regular channel fetches, rather than
+        # building a second inline login flow just for it.
+        QMessageBox.information(self, self.tr_("app_title"),
+                                self.tr_("cqi_fetch_media_login_required"))
+        if self._media_worker is not None:
+            self._media_worker.request_cancel()
+
+    def _on_fetch_media_done(self, ok: bool, msg: str) -> None:
+        self.fetch_media_btn.setEnabled(True)
+        self.fetch_media_btn.setText(self.tr_("cqi_fetch_media"))
+        self._media_worker = None
+        if ok:
+            self._rebuild_recent_posts()  # pick up newly cached thumbnails
+        elif msg and msg != "Login cancelled":
+            QMessageBox.warning(self, self.tr_("app_title"), msg)
 
     def _build_top_viral_table(self) -> None:
         self.top_viral_card = SectionCard(self.tr_("top_viral_title"))
@@ -305,11 +451,13 @@ class DashboardView(QWidget):
         # most people want to see first.
         legend_row = QHBoxLayout()
         legend_row.setSpacing(10)
-        self._trend_series_visible = {"views": True, "reactions": False, "shares": False}
+        self._trend_series_visible = {"views": True, "reactions": False, "shares": False,
+                                      "quality": False}
         self._trend_series_btns: dict[str, QPushButton] = {}
         for key, title_key, color_key in (("views", "col_views", "accent"),
                                           ("reactions", "col_reactions", "weekday"),
-                                          ("shares", "col_shares", "warn")):
+                                          ("shares", "col_shares", "warn"),
+                                          ("quality", "chart_quality", "good")):
             btn = QPushButton(f"● {self.tr_(title_key)}")
             btn.setObjectName("ghost")
             btn.setCheckable(True)
@@ -344,12 +492,7 @@ class DashboardView(QWidget):
             lambda checked: self._on_trend_mode_toggled("month", checked))
         self.trend_mode_month_btn.setChecked(True)
 
-    def _build_charts(self) -> None:
-        self.activity_chart = BarChart(accent=COLORS["activity"], max_labels=999)
-        self.activity_card = ChartCard(self.tr_("chart_activity"), self.activity_chart)
-        self.activity_card.setMinimumHeight(300)
-        self.body.addWidget(self.activity_card)
-
+    def _build_hour_weekday_charts(self) -> None:
         row = QHBoxLayout()
         row.setSpacing(18)
         self.hour_chart = BarChart(accent=COLORS["hour"], max_labels=12)
@@ -392,6 +535,7 @@ class DashboardView(QWidget):
         self._fill_cards()
         self._fill_charts()
         self._rebuild_trend_chart()
+        self._rebuild_recent_posts()
         self._rebuild_table()
         self._rebuild_top_viral_table()
         self.refresh_folder_button()
@@ -478,12 +622,12 @@ class DashboardView(QWidget):
         self._cards["total_posts"].set_value(
             fmt_int(stats.get("total_posts", 0)),
             spark=monthly if len(monthly) > 2 else None)
-        self._cards["avg_views"].set_value(fmt_int(round(stats.get("avg_views", 0))))
-        self._cards["max_views"].set_value(fmt_int(stats.get("max_views", 0)))
+        avg_views_text = fmt_int(round(stats.get("avg_views", 0)))
+        self._cards["avg_views"].set_value(avg_views_text)
+        self._cards["avg_views2"].set_value(avg_views_text)
         self._cards["posts_per_day"].set_value(str(stats.get("avg_posts_per_day", 0)))
         self._cards["avg_reactions"].set_value(fmt_int(round(stats.get("avg_reactions", 0))))
         self._cards["avg_reposts"].set_value(fmt_int(round(stats.get("avg_reposts", 0))))
-        self._cards["max_reposts"].set_value(fmt_int(stats.get("max_reposts", 0)))
 
         # Same metrics/formulas as compare mode.
         members = info.get("members", 0) or 0
@@ -551,12 +695,6 @@ class DashboardView(QWidget):
 
     def _fill_charts(self) -> None:
         dist = self._data.get("distributions", {})
-        monthly = dist.get("monthly", [])
-        m_vals = [m["count"] for m in monthly]
-        m_labels = [self._month_label(m["label"]) for m in monthly]
-        m_tooltips = [f"{m['label']}: {m['count']}" for m in monthly]
-        self.activity_chart.set_data(m_vals, m_labels, tooltips=m_tooltips,
-                                     empty_text=self.tr_("chart_empty"))
 
         hours = dist.get("hour", [0] * 24)
         self.hour_chart.set_data(hours, [str(h) for h in range(24)],
@@ -566,14 +704,6 @@ class DashboardView(QWidget):
         wd_labels = [self.tr_(k) for k in
                      ("wd_mon", "wd_tue", "wd_wed", "wd_thu", "wd_fri", "wd_sat", "wd_sun")]
         self.weekday_chart.set_data(wd, wd_labels, empty_text=self.tr_("chart_empty"))
-
-    @staticmethod
-    def _month_label(iso_month: str) -> str:
-        try:
-            y, m = iso_month.split("-")
-            return MONTHS_SHORT[int(m)]
-        except (ValueError, IndexError):
-            return iso_month
 
     # ------------------------------------------------------- trend chart
     def _on_trend_mode_toggled(self, mode: str, checked: bool) -> None:
@@ -589,23 +719,59 @@ class DashboardView(QWidget):
     def _rebuild_trend_chart(self) -> None:
         monthly = self._data.get("distributions", {}).get("monthly") or []
         if self._trend_mode == "season":
-            labels, views, reactions, shares = self._trend_season_series(monthly)
+            labels, views, reactions, shares, period_keys = self._trend_season_series(monthly)
         else:
             labels = [self._month_label_full(m.get("label", "")) for m in monthly]
             views = [int(m.get("views", 0) or 0) for m in monthly]
             reactions = [int(m.get("reactions", 0) or 0) for m in monthly]
             shares = [int(m.get("shares", 0) or 0) for m in monthly]
+            period_keys = []
+            for m in monthly:
+                try:
+                    y, mo = (int(x) for x in m.get("label", "").split("-"))
+                except ValueError:
+                    period_keys.append(None)
+                    continue
+                period_keys.append((y, mo))
+        quality = self._quality_series(period_keys)
         all_series = {
             "views": {"label": self.tr_("col_views"), "color": COLORS["accent"], "values": views},
             "reactions": {"label": self.tr_("col_reactions"), "color": COLORS["weekday"],
                          "values": reactions},
             "shares": {"label": self.tr_("col_shares"), "color": COLORS["warn"], "values": shares},
+            "quality": {"label": self.tr_("chart_quality"), "color": COLORS["good"],
+                       "values": quality},
         }
         series = [s for key, s in all_series.items() if self._trend_series_visible.get(key)]
         self.trend_chart.set_data(series, labels, empty_text=self.tr_("chart_empty"))
 
+    def _quality_series(self, period_keys: list[tuple | None]) -> list[float]:
+        """Average post-quality gauge score per period (see app.scoring),
+        aligned to `period_keys` (one entry per chart label; None where a
+        period key couldn't be parsed, giving 0 there). Computed from
+        self._rows — the stored top-N pool (see channel_stat.py's module
+        docstring), not the channel's full history, so — like the Top Viral
+        table below — this reflects the pool's posts, not literally every
+        post ever published."""
+        avg_views = self._data.get("stats", {}).get("avg_views", 0) or 0
+        buckets: dict[tuple, list[float]] = {}
+        for r in self._rows:
+            try:
+                dt = datetime.fromisoformat((r.get("date") or "").replace("Z", "+00:00"))
+            except ValueError:
+                continue
+            if self._trend_mode == "season":
+                key, _label = period_key_label(dt.year, dt.month, "season")
+            else:
+                key = (dt.year, dt.month)
+            score = post_gauge_value(post_score_raw(r, avg_views))
+            buckets.setdefault(key, []).append(score)
+        return [round(sum(buckets[k]) / len(buckets[k]), 1) if k in buckets else 0
+                for k in period_keys]
+
     @staticmethod
-    def _trend_season_series(monthly: list[dict]) -> tuple[list[str], list[int], list[int], list[int]]:
+    def _trend_season_series(monthly: list[dict]) -> tuple[list[str], list[int], list[int],
+                                                             list[int], list[tuple]]:
         """Sum each season's 3 months together — same season grouping the
         Folder Stats view uses (see app.periods)."""
         buckets: dict[tuple, dict] = {}
@@ -621,13 +787,12 @@ class DashboardView(QWidget):
             b["shares"] += int(m.get("shares", 0) or 0)
         keys = sorted(buckets)
         return ([buckets[k]["label"] for k in keys], [buckets[k]["views"] for k in keys],
-               [buckets[k]["reactions"] for k in keys], [buckets[k]["shares"] for k in keys])
+               [buckets[k]["reactions"] for k in keys], [buckets[k]["shares"] for k in keys], keys)
 
     @staticmethod
     def _month_label_full(iso_month: str) -> str:
-        """Unlike `_month_label` (bar chart, one year's worth of bars at
-        most), the trend chart can span years, so a bare "Jul" would be
-        ambiguous — tag the year on."""
+        """Unlike a plain month-abbreviation label, the trend chart can span
+        years, so a bare "Jul" would be ambiguous — tag the year on."""
         try:
             y, m = iso_month.split("-")
             return f"{MONTHS_SHORT[int(m)]} '{y[2:]}"
@@ -877,9 +1042,12 @@ class DashboardView(QWidget):
         self.trend_mode_season_btn.setText(self.tr_("period_mode_season"))
         self.trend_mode_month_btn.setText(self.tr_("period_mode_month"))
         for key, title_key in (("views", "col_views"), ("reactions", "col_reactions"),
-                               ("shares", "col_shares")):
+                               ("shares", "col_shares"), ("quality", "chart_quality")):
             self._trend_series_btns[key].setText(f"● {self.tr_(title_key)}")
-        self.activity_card.set_title(self.tr_("chart_activity"))
+        self.recent_posts_card.title_lbl.setText(self.tr_("dash_recent_posts_title"))
+        if self._media_worker is None:
+            self.fetch_media_btn.setText(self.tr_("cqi_fetch_media"))
+        self.fetch_media_btn.setToolTip(self.tr_("cqi_fetch_media_hint"))
         self.hour_card.set_title(self.tr_("chart_by_hour"))
         self.weekday_card.set_title(self.tr_("chart_by_weekday"))
         self.table_card.title_lbl.setText(self.tr_("top_posts_title"))
@@ -891,10 +1059,10 @@ class DashboardView(QWidget):
             self.tr_("col_date"), self.tr_("col_post"), self.tr_("col_views"),
             self.tr_("col_reactions"), self.tr_("col_private"), self.tr_("col_viral_rate")])
         keymap = {"members": "stat_members", "avg_views": "stat_avg_views",
-                  "max_views": "stat_max_views", "posts_per_day": "stat_posts_per_day",
+                  "avg_views2": "stat_avg_views", "posts_per_day": "stat_posts_per_day",
                   "avg_reactions": "stat_avg_reactions", "avg_reposts": "stat_avg_reposts",
-                  "max_reposts": "stat_max_reposts", "erv_pct": "cmp_erv_pct",
-                  "virality_index": "cmp_virality_index", "viral_post_share": "cmp_viral_share"}
+                  "erv_pct": "cmp_erv_pct", "virality_index": "cmp_virality_index",
+                  "viral_post_share": "cmp_viral_share"}
         for k, key in keymap.items():
             self._cards[k].title_lbl.setText(self.tr_(key))
         self._cards["total_posts"].title_lbl.setText(
@@ -907,4 +1075,5 @@ class DashboardView(QWidget):
             self._cards[key].setToolTip(self.tr_(tip_key))
         if self._data:
             self.sub_lbl.setText(self._header_sub())
+            self._rebuild_recent_posts()  # tooltips embed translated text
         self.refresh_folder_button()

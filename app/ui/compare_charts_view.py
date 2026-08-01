@@ -1,10 +1,21 @@
 """Multi-channel trend comparison: one line per selected channel (2-8, chosen
 via the sidebar's Compare Charts mode — see SidePanel.compare_charts_selected)
-on each of three stacked charts, in this order: Views, Shares, Reactions.
-Shares a month/season toggle across all three, and the same MultiLineChart
-widget the single-channel dashboard trend chart uses.
+on each of four stacked charts, in this order: Quality, Views, Shares,
+Reactions. Shares a month/season toggle across all four, and the same
+MultiLineChart widget the single-channel dashboard trend chart uses.
+
+Quality is computed differently from the other three: Views/Shares/Reactions
+are simple per-period sums straight out of each channel's
+`distributions.monthly` (every scanned post, see channel_stat.py's module
+docstring), but a post's quality score (app.scoring) needs per-post
+reactions/forwards/comments/views, which only the stored top-N pool
+(`rows`) carries — so Quality is a per-period *average* over whatever pool
+posts fall in each period, same approach as the single-channel dashboard's
+own Quality trend line.
 """
 from __future__ import annotations
+
+from datetime import datetime
 
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
@@ -13,6 +24,7 @@ from PySide6.QtWidgets import (
 )
 
 from ..periods import period_key_label
+from ..scoring import post_gauge_value, post_score_raw
 from .charts import MultiLineChart
 from .dashboard_view import MONTHS_SHORT
 from .widgets import ChartCard
@@ -35,8 +47,10 @@ _SERIES_COLORS = [
 ]
 
 # (metric key, i18n key for its chart title) — order here is display order
-# top-to-bottom, per spec: Views, Shares, Reactions.
-_METRICS = [("views", "col_views"), ("shares", "col_shares"), ("reactions", "col_reactions")]
+# top-to-bottom. "quality" is handled separately in _rebuild_charts (see
+# module docstring) — the other three are plain monthly-aggregate sums.
+_METRICS = [("quality", "chart_quality"), ("views", "col_views"),
+            ("shares", "col_shares"), ("reactions", "col_reactions")]
 
 
 def _pretty_label(key_label: str, mode: str) -> str:
@@ -143,10 +157,18 @@ class CompareChartsView(QWidget):
         self._rebuild_charts()
 
     def _clear_legend(self) -> None:
+        # hide() first — takeAt() only unmanages a widget from the layout,
+        # it doesn't hide it, and deleteLater() doesn't actually destroy it
+        # until the next event-loop pass, so a rapid double-rebuild (e.g.
+        # selecting several channels in quick succession, each triggering
+        # its own load()) can leave stale legend labels visibly overlapping
+        # the chart below them for a frame — or longer, if nothing pumps
+        # the event loop before the next rebuild.
         while self.legend_row.count():
             item = self.legend_row.takeAt(0)
             w = item.widget()
             if w is not None:
+                w.hide()
                 w.deleteLater()
 
     def _rebuild_legend(self) -> None:
@@ -196,9 +218,29 @@ class CompareChartsView(QWidget):
             for i, (data, buckets) in enumerate(zip(self._datas, per_channel)):
                 name = data.get("title") or data.get("channel") or "—"
                 color = _SERIES_COLORS[i % len(_SERIES_COLORS)]
-                values = [buckets.get(k, {}).get(metric, 0) for k in keys]
+                if metric == "quality":
+                    values = self._quality_series_for_channel(data, keys)
+                else:
+                    values = [buckets.get(k, {}).get(metric, 0) for k in keys]
                 series.append({"label": name, "color": color, "values": values})
             self._charts[metric].set_data(series, labels, empty_text=self.tr_("chart_empty"))
+
+    def _quality_series_for_channel(self, data: dict, keys: list[tuple]) -> list[float]:
+        """Average post-quality gauge score (app.scoring) per period key,
+        from `data["rows"]` — see module docstring for why this can't just
+        be summed out of `distributions.monthly` like the other metrics."""
+        avg_views = data.get("stats", {}).get("avg_views", 0) or 0
+        buckets: dict[tuple, list[float]] = {}
+        for r in data.get("rows", []) or []:
+            try:
+                dt = datetime.fromisoformat((r.get("date") or "").replace("Z", "+00:00"))
+            except ValueError:
+                continue
+            key, _label = period_key_label(dt.year, dt.month, self._mode)
+            score = post_gauge_value(post_score_raw(r, avg_views))
+            buckets.setdefault(key, []).append(score)
+        return [round(sum(buckets[k]) / len(buckets[k]), 1) if k in buckets else 0
+                for k in keys]
 
     # ---------------------------------------------------------- translate
     def retranslate(self) -> None:

@@ -90,7 +90,7 @@ class MainWindow(QMainWindow):
         self.config_view.channel_fetched.connect(self._on_channel_fetched)
         self.config_view.folders_changed.connect(self._on_folders_changed)
         self.config_view.checkpoints_changed.connect(self._refresh_sidebar)
-        self.dashboard = DashboardView(self.i18n, self.folder_store)
+        self.dashboard = DashboardView(self.i18n, self.folder_store, self.cfg)
         self.dashboard.refetch_requested.connect(self._on_refetch)
         self.dashboard.remove_requested.connect(self._on_remove)
         self.dashboard.folders_changed.connect(self._on_folders_changed)

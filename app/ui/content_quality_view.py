@@ -3,51 +3,13 @@
 relative to that post's own views, not raw view count. Click a card to
 open the post on Telegram.
 
-    comments      = min(comments, 100)   # capped — see below
-    reaction_wt   = min(reactions, 1000) × 0.045
-                  + max(0, min(reactions, 10000) − 1000) × 0.005
-    viral_excess  = max(0, views − channel's avg_views)
-    ERV% = (forwards × 1.0 + comments × 0.25 + reaction_wt
-            + viral_excess × 0.2) / views × 100
-    raw  = ERV% × 100
-    gauge = raw / (raw + K) × 100 → onto the 0-1000 gauge, K=580 (this
-            app's real per-post median raw score) so a typical post lands
-            near the middle — a hard clamp would flatten most real posts
-            at the ceiling (see the equivalent problem worked through for
-            the old channel-level score).
-
-Numerator terms are weighted by how much each actually signals quality,
-most to least: forwards (a deliberate, costly share) first, then comments
-(real engagement, but cheaper to leave than a share, and capped at 100 —
-past that a post is clearly getting real discussion either way, and an
-outlier discussion thread of 500+ comments shouldn't just keep dragging the
-score up further), then reactions weighted lowest and in two brackets
-instead of one flat rate — the first 1000 reactions count at 0.045 each,
-anything from there up to 10 000 counts at only 0.005 each, and beyond
-10 000 nothing more is added at all (some posts have anomalously high
-reaction counts relative to their own views — Telegram's view count can lag
-behind reactions, or reactions can accumulate from contexts views don't
-capture — so a flat weight would let them dominate the score more than they
-should; tapering in brackets keeps a post's first reactions meaningful
-without letting a runaway count keep adding weight forever). A post that
-beat its own channel's average views also earns a
-"viral excess" bonus (floored at 0, so an under-average post gets neither
-bonus nor penalty) — weighted at 0.2, but since it's still divided by the
-post's own views afterward, this term alone can only ever contribute 0-20%
-of ERV%, so a breakout post gets rewarded without swamping the engagement
-terms above. Views themselves stay the ratio's denominator throughout, not
-a directly-weighted term. This is still a plain per-post ratio, so it
-doesn't reward a post just for being the most-viewed one on raw terms — the
-viral-excess bonus only rewards *beating its own channel's usual reach*,
-which is a different thing (a channel's biggest post is often just the one
-that happened to reach the widest audience, not necessarily the best
-content — but a post that's unusually large *for that channel* really is
-signal). An earlier version of this view scored whole *channels* using a
-channel-level "Virality Index" (max_views / avg_views, trimmed/capped to
-tame single-post outliers) that was dropped once this view switched to
-scoring individual posts — the viral-excess term above is a deliberate,
-narrower reintroduction of that same avg_views comparison at the per-post
-level, not a return to scoring whole channels.
+The scoring formula itself (ERV%, the reaction/comment/forward/viral-excess
+weighting, the K-tuned gauge) lives in app.scoring, not here — it's shared
+with the per-channel Dashboard's Quality trend line and recent-posts row
+(app.ui.dashboard_view). Likewise the actual post-card widget (thumbnail,
+placeholder icon, gauge, counts) is `PostCard` in app.ui.widgets, reused by
+both views for the same reason: neither view imports UI code from the
+other, so there's no risk of a circular import between them.
 
 Posts come from each channel's checkpoint `rows` — the stored top-N sample
 (see folder_stat_view's module docstring), not a fresh fetch — filtered to
@@ -71,8 +33,8 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from PySide6.QtCore import QUrl, Qt
-from PySide6.QtGui import QDesktopServices, QFont, QFontMetrics, QPixmap
+from PySide6.QtCore import Qt
+from PySide6.QtGui import QFont, QFontMetrics, QPixmap
 from PySide6.QtWidgets import (
     QButtonGroup, QComboBox, QFrame, QGridLayout, QHBoxLayout, QLabel,
     QMessageBox, QPushButton, QScrollArea, QVBoxLayout, QWidget,
@@ -81,79 +43,28 @@ from PySide6.QtWidgets import (
 from ..config import Config
 from ..folders import FolderStore
 from ..media_cache import thumbnail_path
-from ..periods import period_key_label
+from ..periods import YEAR_WINDOW_OPTIONS, period_key_label, year_window_cutoff
+from ..scoring import post_gauge_value, post_score_raw, score_tooltip
 from ..store import ChannelStore
 from ..tools.media_fetch import run_thumbnail_cache
 from ..worker import ToolWorker
-from .charts import GaugeDial
 from .dashboard_view import ChannelReportDialog, build_post_link, fmt_int
-from .widgets import Card, hline
+from .widgets import (
+    PostCard, POST_CARD_HEIGHT as CARD_HEIGHT, POST_CARD_PLACEHOLDERS as _MEDIA_PLACEHOLDERS,
+    POST_CARD_TEXT_LINES as _TEXT_LINES, POST_CARD_TEXT_PIXEL_SIZE as _TEXT_PIXEL_SIZE,
+    POST_CARD_TEXT_WIDTH as _TEXT_WIDTH, POST_CARD_THUMB_HEIGHT as _THUMB_HEIGHT,
+    POST_CARD_WIDTH as CARD_WIDTH, elide_to_lines as _elide_to_lines, hline,
+)
 
-CARD_WIDTH = 195    # 130 * 1.5
-CARD_HEIGHT = 191   # 225 * 0.85
-GAUGE_MAX = 1000
 _GRID_SPACING = 14
 _PAGE_MARGIN_LEFT = 34
 _PAGE_MARGIN_RIGHT = 40
-_THUMB_HEIGHT = 63   # 74 * 0.85
-_GAUGE_SIZE = 49     # 58 * 0.85
 MAX_POSTS_SHOWN = 60   # keeps "All time" across a big folder from being huge
 MONTHS_FULL = ["", "January", "February", "March", "April", "May", "June",
                "July", "August", "September", "October", "November", "December"]
 
-_TEXT_LINES = 2
-_TEXT_PIXEL_SIZE = 10
-_TEXT_WIDTH = CARD_WIDTH - 20   # card's own left+right content margins
-
 _MEDIA_LOG_WIDTH = 260
 _MEDIA_LOG_PIXEL_SIZE = 12   # matches QLabel#hint's font-size in theme.py
-
-_PLACEHOLDER_PIXEL_SIZE = 52   # 🏞️/▶️/⚪️ font-size on a card with no cached thumb
-
-# media_type (see channel_stat.py) -> placeholder icon shown until a real
-# thumbnail is fetched; "" (text-only post, or an older checkpoint that
-# predates this field) shows no icon at all.
-_MEDIA_PLACEHOLDERS = {"photo": "🏞️", "video": "▶️", "video_note": "⚪️"}
-
-
-def _elide_to_lines(text: str, width: int, max_lines: int, pixel_size: int) -> str:
-    """Word-wrap `text` to at most `max_lines` lines that fit `width` px at
-    `pixel_size`, appending "…" if it had to cut content short — QLabel's
-    own elideMode only elides a *single* line, it can't do this after N
-    wrapped lines, so this measures and breaks the text by hand.
-
-    Builds a fresh QFont for measurement (rather than trusting a live
-    widget's .font()) because this app's global QSS sets font-size in px,
-    which makes an unpolished widget's QFont report no usable point/pixel
-    size yet — same issue worked through for the Content Quality Index
-    metrics line."""
-    text = " ".join(text.split())
-    if not text:
-        return ""
-    font = QFont()
-    font.setPixelSize(pixel_size)
-    fm = QFontMetrics(font)
-
-    words = text.split(" ")
-    lines: list[str] = []
-    i = 0
-    while i < len(words) and len(lines) < max_lines:
-        line = words[i]
-        i += 1
-        while i < len(words):
-            trial = f"{line} {words[i]}"
-            if fm.horizontalAdvance(trial) > width:
-                break
-            line = trial
-            i += 1
-        lines.append(line)
-
-    if i < len(words):  # ran out of lines before running out of words
-        last = lines[-1] if lines else ""
-        while last and fm.horizontalAdvance(last + "…") > width:
-            last = last[:-1].rstrip()
-        lines[-1] = f"{last}…" if last else "…"
-    return "\n".join(lines)
 
 
 def _parse_date(iso: str) -> datetime | None:
@@ -185,163 +96,6 @@ def _channel_avg_views(ch: dict) -> float:
     return float(ch.get("stats", {}).get("avg_views", 0) or 0)
 
 
-# Numerator terms are weighted by how much each actually signals content
-# quality, most to least: a share (forward) is a deliberate, costly
-# endorsement, so it counts most; a comment is real engagement but cheaper
-# to leave than a share; a reaction is weighted lowest — see the module
-# docstring for why (some posts have anomalously high reaction counts
-# relative to their own views). Views stay the ratio's *denominator*, not a
-# weighted term — every term above is already measured relative to them.
-_FORWARD_WEIGHT = 1.0
-_COMMENT_WEIGHT = 0.25
-_COMMENT_CAP = 100   # comments beyond this count the same as exactly 100
-
-# Reactions are weighted in two brackets instead of one flat rate, so a
-# post's first 1000 reactions still count meaningfully but each one beyond
-# that (up to 10 000) counts for much less — and beyond 10 000, nothing
-# more is added at all. Same anomalous-reaction-count problem as the flat
-# weight this replaced (see module docstring), just tapered smoothly
-# instead of crushed uniformly.
-_REACTION_TIER1_CAP = 1000
-_REACTION_TIER1_WEIGHT = 0.045
-_REACTION_TIER2_CAP = 10_000
-_REACTION_TIER2_WEIGHT = 0.005
-
-
-def _reaction_weighted(reactions: int) -> float:
-    tier1 = min(reactions, _REACTION_TIER1_CAP) * _REACTION_TIER1_WEIGHT
-    tier2 = max(0, min(reactions, _REACTION_TIER2_CAP) - _REACTION_TIER1_CAP) * _REACTION_TIER2_WEIGHT
-    return tier1 + tier2
-
-# A post that pulled in more views than its own channel's average is
-# rewarded for that too — "views bigger than average" (floored at 0 so an
-# under-average post gets no bonus/penalty either way), weighted and folded
-# into the same numerator as the terms above. Because it's still divided by
-# the post's own views afterward, this term alone can only ever contribute
-# 0-20% of ERV% (it approaches, but never reaches, _VIRAL_WEIGHT × 100% as
-# views grows far past average) — it boosts a genuine breakout post without
-# letting it swamp the engagement-ratio terms.
-_VIRAL_WEIGHT = 0.2
-
-
-def post_score_raw(row: dict, avg_views: float) -> float:
-    """ERV% × 100 for one post — see module docstring. `avg_views` is that
-    post's own channel's average (checkpoint `stats.avg_views`)."""
-    views = int(row.get("views", 0) or 0)
-    if not views:
-        return 0.0
-    reactions = int(row.get("reactions", 0) or 0)
-    forwards = int(row.get("forwards", 0) or 0)
-    comments = min(int(row.get("comments", 0) or 0), _COMMENT_CAP)
-    viral_excess = max(0.0, views - avg_views)
-    weighted = (forwards * _FORWARD_WEIGHT + comments * _COMMENT_WEIGHT
-               + _reaction_weighted(reactions) + viral_excess * _VIRAL_WEIGHT)
-    erv_pct = weighted / views * 100
-    return erv_pct * 100
-
-
-# Real median raw post score across this app's checkpoints (post the
-# forward/comment/reaction/viral weighting above) — chosen so a typical
-# post lands near the middle of the gauge.
-_POST_GAUGE_K = 580.0
-
-
-def _saturate(raw: float, k: float) -> float:
-    """Map an unbounded-above non-negative value onto [0, 100) via
-    raw/(raw+k) — see the module docstring for why a hard clamp is worse."""
-    if raw <= 0:
-        return 0.0
-    return 100.0 * raw / (raw + k)
-
-
-def post_gauge_value(raw_score: float) -> float:
-    """Map an unbounded raw post score onto 0-1000 for the gauge."""
-    return GAUGE_MAX / 100.0 * _saturate(raw_score, _POST_GAUGE_K)
-
-
-class _PostCard(Card):
-    """A single post: title, thumbnail (if cached), a 2-line text preview,
-    and a gauge + absolute counts row. The whole card opens the post on
-    click — every child is mouse-transparent so nothing (least of all the
-    otherwise-interactive-looking GaugeDial) can swallow that click."""
-
-    def __init__(self, parent=None) -> None:
-        super().__init__(parent)
-        self.setFixedSize(CARD_WIDTH, CARD_HEIGHT)
-        self.setCursor(Qt.CursorShape.PointingHandCursor)
-        self._link = ""
-
-        lay = QVBoxLayout(self)
-        lay.setContentsMargins(10, 9, 10, 7)
-        lay.setSpacing(5)
-
-        self.name_lbl = QLabel("—")
-        self.name_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.name_lbl.setWordWrap(False)
-        self.name_lbl.setObjectName("hint")
-        self.name_lbl.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
-        lay.addWidget(self.name_lbl)
-
-        # Placeholder emoji (🏞️/▶️/⚪️) when there's no cached thumbnail yet —
-        # setStyleSheet, not setFont(): theme.py's global `QWidget
-        # {font-size: 14px}` rule outranks a plain setFont() once this
-        # widget is polished/shown (see the equivalent problem worked
-        # through for the Content Quality Index cards' metrics line).
-        self.thumb_lbl = QLabel()
-        self.thumb_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.thumb_lbl.setFixedHeight(_THUMB_HEIGHT)
-        self.thumb_lbl.setStyleSheet(f"font-size: {_PLACEHOLDER_PIXEL_SIZE}px;")
-        self.thumb_lbl.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
-        lay.addWidget(self.thumb_lbl)
-
-        # Text is pre-wrapped to exactly 2 lines with a trailing "…" by
-        # _elide_to_lines (QLabel can't natively elide after N *wrapped*
-        # lines, only a single line) — wordWrap off since the line breaks
-        # are already embedded in the string.
-        self.text_lbl = QLabel("")
-        self.text_lbl.setWordWrap(False)
-        self.text_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.text_lbl.setObjectName("hint")
-        self.text_lbl.setStyleSheet("font-size: 10px;")
-        self.text_lbl.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
-        lay.addWidget(self.text_lbl)
-
-        lay.addStretch(1)
-
-        bottom = QHBoxLayout()
-        bottom.setSpacing(8)
-        self.gauge = GaugeDial(0, GAUGE_MAX)
-        self.gauge.setFixedSize(_GAUGE_SIZE, _GAUGE_SIZE)
-        self.gauge.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
-        bottom.addWidget(self.gauge)
-
-        self.counts_lbl = QLabel("")
-        self.counts_lbl.setWordWrap(True)
-        self.counts_lbl.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
-        bottom.addWidget(self.counts_lbl, 1)
-        lay.addLayout(bottom)
-
-    def mousePressEvent(self, event) -> None:  # noqa: N802 (Qt naming)
-        if self._link:
-            QDesktopServices.openUrl(QUrl(self._link))
-        super().mousePressEvent(event)
-
-    def set_data(self, label: str, thumb: QPixmap | None, placeholder: str, text: str,
-                gauge_value: float, counts_text: str, link: str, tooltip: str) -> None:
-        self.name_lbl.setText(label)
-        if thumb is not None and not thumb.isNull():
-            self.thumb_lbl.setPixmap(thumb)
-        elif placeholder:
-            self.thumb_lbl.setText(placeholder)
-        else:
-            self.thumb_lbl.clear()
-        self.text_lbl.setText(text)
-        self.gauge.setValue(max(0, min(GAUGE_MAX, round(gauge_value))))
-        self.counts_lbl.setText(counts_text)
-        self._link = link
-        self.setToolTip(tooltip)
-
-
 class ContentQualityView(QWidget):
     def __init__(self, i18n, folder_store: FolderStore, channel_store: ChannelStore,
                  cfg: Config, parent=None) -> None:
@@ -352,11 +106,13 @@ class ContentQualityView(QWidget):
         self.cfg = cfg
         self._channels: list[dict] = []
         self._post_entries: list[dict] = []
-        self._cards: list[_PostCard] = []
+        self._cards: list[PostCard] = []
         self._cols = 0
         self._period_mode = "season"
         self._selected_period_key: tuple | None = None
         self._period_btns: dict[tuple, QPushButton] = {}
+        self._year_window_key = "all"
+        self._year_btns: dict[str, QPushButton] = {}
         self._media_worker: ToolWorker | None = None
         self._build_ui()
 
@@ -432,18 +188,18 @@ class ContentQualityView(QWidget):
         self.mode_month_btn = QPushButton(self.tr_("period_mode_month"))
         self.mode_month_btn.setObjectName("ghost")
         self.mode_month_btn.setCheckable(True)
-        self.mode_all_btn = QPushButton(self.tr_("period_mode_all"))
-        self.mode_all_btn.setObjectName("ghost")
-        self.mode_all_btn.setCheckable(True)
+        self.mode_year_btn = QPushButton(self.tr_("period_mode_year"))
+        self.mode_year_btn.setObjectName("ghost")
+        self.mode_year_btn.setCheckable(True)
         self._mode_btn_group = QButtonGroup(self)
         self._mode_btn_group.setExclusive(True)
         self._mode_btn_group.addButton(self.mode_season_btn)
         self._mode_btn_group.addButton(self.mode_month_btn)
-        self._mode_btn_group.addButton(self.mode_all_btn)
+        self._mode_btn_group.addButton(self.mode_year_btn)
         mode_row = QHBoxLayout()
         mode_row.addWidget(self.mode_season_btn)
         mode_row.addWidget(self.mode_month_btn)
-        mode_row.addWidget(self.mode_all_btn)
+        mode_row.addWidget(self.mode_year_btn)
         mode_row.addStretch()
         page.addLayout(mode_row)
 
@@ -482,7 +238,7 @@ class ContentQualityView(QWidget):
         # default mode (which fires the toggle once).
         self.mode_season_btn.toggled.connect(lambda c: self._on_mode_toggled("season", c))
         self.mode_month_btn.toggled.connect(lambda c: self._on_mode_toggled("month", c))
-        self.mode_all_btn.toggled.connect(lambda c: self._on_mode_toggled("all", c))
+        self.mode_year_btn.toggled.connect(lambda c: self._on_mode_toggled("year", c))
         self.mode_season_btn.setChecked(True)
         self.tg_links_limit_combo.currentIndexChanged.connect(self._on_channel_limit_changed)
 
@@ -619,6 +375,53 @@ class ContentQualityView(QWidget):
         scroll.setFixedHeight(min(220, 46 * max(len(years), 1) + 10))
         self.picker_lay.addWidget(scroll)
 
+    def _year_window_days(self) -> int | None:
+        for key, _label_key, days in YEAR_WINDOW_OPTIONS:
+            if key == self._year_window_key:
+                return days
+        return None
+
+    def _year_window_label(self) -> str:
+        for key, label_key, _days in YEAR_WINDOW_OPTIONS:
+            if key == self._year_window_key:
+                return self.tr_(label_key)
+        return ""
+
+    def _build_year_picker(self) -> None:
+        row_widget = QWidget()
+        row_lay = QHBoxLayout(row_widget)
+        row_lay.setContentsMargins(0, 0, 0, 0)
+        row_lay.setSpacing(6)
+        self._year_btn_group = QButtonGroup(self)
+        self._year_btn_group.setExclusive(True)
+        self._year_btns = {}
+        for key, label_key, _days in YEAR_WINDOW_OPTIONS:
+            btn = QPushButton(self.tr_(label_key))
+            btn.setObjectName("ghost")
+            btn.setCheckable(True)
+            btn.setCursor(Qt.CursorShape.PointingHandCursor)
+            self._year_btn_group.addButton(btn)
+            btn.toggled.connect(lambda checked, k=key: self._on_year_window_toggled(k, checked))
+            self._year_btns[key] = btn
+            row_lay.addWidget(btn)
+        row_lay.addStretch()
+
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setWidget(row_widget)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        scroll.setFixedHeight(48)
+        self.picker_lay.addWidget(scroll)
+        self._year_btns[self._year_window_key].setChecked(True)
+
+    def _on_year_window_toggled(self, key: str, checked: bool) -> None:
+        if not checked:
+            return
+        self._year_window_key = key
+        self._selected_period_key = ("year", key)
+        self._rebuild_posts()
+
     def _collect_all_period_keys(self, mode: str) -> list[tuple[tuple, str]]:
         """Every period key/label across *all* tracked channels, regardless
         of folder — matches Folder Stats: the picker buttons stay put as
@@ -644,13 +447,11 @@ class ContentQualityView(QWidget):
         self._period_btn_group = QButtonGroup(self)
         self._period_btn_group.setExclusive(True)
         self._period_btns = {}
-
-        if self._period_mode == "all":
-            self.picker_container.setVisible(False)
-            self._selected_period_key = ("all",)
-            self._rebuild_posts()
-            return
         self.picker_container.setVisible(True)
+
+        if self._period_mode == "year":
+            self._build_year_picker()  # its own setChecked(True) triggers the rebuild
+            return
 
         keys_labels = self._collect_all_period_keys(self._period_mode)
         if self._period_mode == "season":
@@ -679,10 +480,15 @@ class ContentQualityView(QWidget):
         capped at MAX_POSTS_SHOWN."""
         mode = self._period_mode
         target_key = self._selected_period_key
+        cutoff = year_window_cutoff(self._year_window_days()) if mode == "year" else None
         posts: list[dict] = []
         for ch in self._channels:
             for row in ch.get("rows", []) or []:
-                if mode != "all":
+                if mode == "year":
+                    dt = _parse_date(row.get("date", ""))
+                    if dt is None or (cutoff is not None and dt < cutoff):
+                        continue
+                else:
                     dt = _parse_date(row.get("date", ""))
                     if dt is None:
                         continue
@@ -720,36 +526,6 @@ class ContentQualityView(QWidget):
     def _on_channel_limit_changed(self, _index: int) -> None:
         self._rebuild_cards()
 
-    def _score_tooltip(self, label: str, row: dict, avg_views: float,
-                       raw_score: float, gauge_value: float) -> str:
-        """Header (label + final score) plus the actual numbers plugged into
-        post_score_raw's formula for this specific post — so hovering a card
-        answers "why this score" without needing to open the module
-        docstring."""
-        views = int(row.get("views", 0) or 0)
-        reactions = int(row.get("reactions", 0) or 0)
-        forwards = int(row.get("forwards", 0) or 0)
-        comments = min(int(row.get("comments", 0) or 0), _COMMENT_CAP)
-        reaction_weighted = _reaction_weighted(reactions)
-        viral_excess = max(0.0, views - avg_views)
-        weighted = (forwards * _FORWARD_WEIGHT + comments * _COMMENT_WEIGHT
-                   + reaction_weighted + viral_excess * _VIRAL_WEIGHT)
-        erv_pct = (weighted / views * 100) if views else 0.0
-        header = self.tr_("cqi_post_tooltip", label=label, score=f"{raw_score:.1f}")
-        formula = self.tr_(
-            "cqi_post_tooltip_formula",
-            fwd_w=f"{_FORWARD_WEIGHT:g}", cmt_w=f"{_COMMENT_WEIGHT:g}",
-            t1cap=fmt_int(_REACTION_TIER1_CAP), t1w=f"{_REACTION_TIER1_WEIGHT:g}",
-            t2cap=fmt_int(_REACTION_TIER2_CAP), t2w=f"{_REACTION_TIER2_WEIGHT:g}",
-            vrl_w=f"{_VIRAL_WEIGHT:g}", forwards=fmt_int(forwards),
-            comments=fmt_int(comments), reactions=fmt_int(reactions),
-            reaction_weighted=f"{reaction_weighted:.2f}",
-            avg_views=fmt_int(round(avg_views)),
-            viral_excess=fmt_int(round(viral_excess)),
-            views=fmt_int(views), erv=f"{erv_pct:.2f}", raw=f"{raw_score:.1f}",
-            k=f"{_POST_GAUGE_K:g}", gauge=round(gauge_value))
-        return f"{header}\n\n{formula}"
-
     def _rebuild_cards(self) -> None:
         # See ContentQualityView's earlier channel-card version of this
         # bug: takeAt() unmanages a widget from the layout but doesn't hide
@@ -772,7 +548,7 @@ class ContentQualityView(QWidget):
         for entry in self._channel_limited_entries():
             ch = entry["channel"]
             row = entry["row"]
-            card = _PostCard()
+            card = PostCard()
 
             label = _channel_label(ch)
             text = _elide_to_lines(row.get("text") or "", _TEXT_WIDTH, _TEXT_LINES,
@@ -797,8 +573,8 @@ class ContentQualityView(QWidget):
             counts_text = (f"{fmt_int(views)}👁️ {fmt_int(comments)}💬\n"
                           f"{fmt_int(reactions)}❤️ {fmt_int(forwards)}🔄")
             gauge_value = post_gauge_value(entry["raw_score"])
-            tooltip = self._score_tooltip(label, row, _channel_avg_views(ch),
-                                          entry["raw_score"], gauge_value)
+            tooltip = score_tooltip(self.tr_, label, row, _channel_avg_views(ch),
+                                    entry["raw_score"], gauge_value, fmt_int)
 
             card.set_data(label, thumb, placeholder, text, gauge_value, counts_text,
                          link, tooltip)
@@ -889,8 +665,8 @@ class ContentQualityView(QWidget):
 
     # ------------------------------------------------------------ tg links
     def _current_period_label(self) -> str:
-        if self._period_mode == "all":
-            return self.tr_("period_mode_all")
+        if self._period_mode == "year":
+            return self._year_window_label()
         btn = self._period_btn_group.checkedButton()
         return btn.text() if btn else ""
 
@@ -934,7 +710,10 @@ class ContentQualityView(QWidget):
         self.empty_posts_lbl.setText(self.tr_("cqi_empty_posts"))
         self.mode_season_btn.setText(self.tr_("period_mode_season"))
         self.mode_month_btn.setText(self.tr_("period_mode_month"))
-        self.mode_all_btn.setText(self.tr_("period_mode_all"))
+        self.mode_year_btn.setText(self.tr_("period_mode_year"))
+        for key, btn in self._year_btns.items():
+            label_key = next(lk for k, lk, _d in YEAR_WINDOW_OPTIONS if k == key)
+            btn.setText(self.tr_(label_key))
         # Card tooltips embed translated text (see _score_tooltip) — rebuild
         # so they don't stay stuck in whatever language was active when the
         # cards were last built.

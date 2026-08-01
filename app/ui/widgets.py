@@ -6,14 +6,69 @@ analytics_dashboard cards do.
 """
 from __future__ import annotations
 
-from PySide6.QtCore import QEvent, Qt
-from PySide6.QtGui import QColor, QIcon, QPainter, QPixmap
+from PySide6.QtCore import QUrl, QEvent, Qt
+from PySide6.QtGui import QColor, QDesktopServices, QFont, QFontMetrics, QIcon, QPainter, QPixmap
 from PySide6.QtWidgets import (
     QFrame, QHBoxLayout, QLabel, QPushButton, QToolTip, QVBoxLayout, QWidget,
 )
 
-from .charts import Sparkline
+from ..scoring import GAUGE_MAX
+from .charts import GaugeDial, Sparkline
 from .theme import COLORS, add_shadow, svg_pixmap
+
+POST_CARD_WIDTH = 195    # 130 * 1.5
+POST_CARD_HEIGHT = 191   # 225 * 0.85 (see PostCard)
+POST_CARD_THUMB_HEIGHT = 63   # 74 * 0.85
+POST_CARD_GAUGE_SIZE = 49     # 58 * 0.85
+POST_CARD_PLACEHOLDER_PIXEL_SIZE = 52   # 🏞️/▶️/⚪️ font-size on a card with no cached thumb
+POST_CARD_TEXT_PIXEL_SIZE = 10
+POST_CARD_TEXT_LINES = 2
+POST_CARD_TEXT_WIDTH = POST_CARD_WIDTH - 20   # card's own left+right content margins
+
+# media_type (see channel_stat.py) -> placeholder icon shown until a real
+# thumbnail is fetched; "" (text-only post, or an older checkpoint that
+# predates this field) shows no icon at all.
+POST_CARD_PLACEHOLDERS = {"photo": "🏞️", "video": "▶️", "video_note": "⚪️"}
+
+
+def elide_to_lines(text: str, width: int, max_lines: int, pixel_size: int) -> str:
+    """Word-wrap `text` to at most `max_lines` lines that fit `width` px at
+    `pixel_size`, appending "…" if it had to cut content short — QLabel's
+    own elideMode only elides a *single* line, it can't do this after N
+    wrapped lines, so this measures and breaks the text by hand.
+
+    Builds a fresh QFont for measurement (rather than trusting a live
+    widget's .font()) because this app's global QSS sets font-size in px,
+    which makes an unpolished widget's QFont report no usable point/pixel
+    size yet — same issue worked through for the Content Quality Index
+    metrics line."""
+    text = " ".join(text.split())
+    if not text:
+        return ""
+    font = QFont()
+    font.setPixelSize(pixel_size)
+    fm = QFontMetrics(font)
+
+    words = text.split(" ")
+    lines: list[str] = []
+    i = 0
+    while i < len(words) and len(lines) < max_lines:
+        line = words[i]
+        i += 1
+        while i < len(words):
+            trial = f"{line} {words[i]}"
+            if fm.horizontalAdvance(trial) > width:
+                break
+            line = trial
+            i += 1
+        lines.append(line)
+
+    if i < len(words):  # ran out of lines before running out of words
+        last = lines[-1] if lines else ""
+        while last and fm.horizontalAdvance(last + "…") > width:
+            last = last[:-1].rstrip()
+        lines[-1] = f"{last}…" if last else "…"
+    return "\n".join(lines)
 
 
 def folder_icon(color: str) -> QIcon:
@@ -37,6 +92,96 @@ class Card(QFrame):
         self.setObjectName("card")
         if shadow:
             add_shadow(self)
+
+
+class PostCard(Card):
+    """A single post: title, thumbnail (if cached), a 2-line text preview,
+    and a gauge + absolute counts row. The whole card opens the post on
+    click — every child is mouse-transparent so nothing (least of all the
+    otherwise-interactive-looking GaugeDial) can swallow that click.
+
+    Shared by the High-Quality Posts view (one card per post, across many
+    channels — see app.ui.content_quality_view) and the per-channel
+    Dashboard's "recent posts" row (see app.ui.dashboard_view) — kept here
+    rather than in either view so neither has to import UI code from the
+    other to reuse it. Scoring itself lives in app.scoring for the same
+    reason."""
+
+    def __init__(self, parent=None) -> None:
+        super().__init__(parent)
+        self.setFixedSize(POST_CARD_WIDTH, POST_CARD_HEIGHT)
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._link = ""
+
+        lay = QVBoxLayout(self)
+        lay.setContentsMargins(10, 9, 10, 7)
+        lay.setSpacing(5)
+
+        self.name_lbl = QLabel("—")
+        self.name_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.name_lbl.setWordWrap(False)
+        self.name_lbl.setObjectName("hint")
+        self.name_lbl.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
+        lay.addWidget(self.name_lbl)
+
+        # Placeholder emoji (🏞️/▶️/⚪️) when there's no cached thumbnail yet —
+        # setStyleSheet, not setFont(): theme.py's global `QWidget
+        # {font-size: 14px}` rule outranks a plain setFont() once this
+        # widget is polished/shown (see the equivalent problem worked
+        # through for the Content Quality Index cards' metrics line).
+        self.thumb_lbl = QLabel()
+        self.thumb_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.thumb_lbl.setFixedHeight(POST_CARD_THUMB_HEIGHT)
+        self.thumb_lbl.setStyleSheet(f"font-size: {POST_CARD_PLACEHOLDER_PIXEL_SIZE}px;")
+        self.thumb_lbl.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
+        lay.addWidget(self.thumb_lbl)
+
+        # Text is pre-wrapped to exactly 2 lines with a trailing "…" by
+        # elide_to_lines (QLabel can't natively elide after N *wrapped*
+        # lines, only a single line) — wordWrap off since the line breaks
+        # are already embedded in the string.
+        self.text_lbl = QLabel("")
+        self.text_lbl.setWordWrap(False)
+        self.text_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.text_lbl.setObjectName("hint")
+        self.text_lbl.setStyleSheet("font-size: 10px;")
+        self.text_lbl.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
+        lay.addWidget(self.text_lbl)
+
+        lay.addStretch(1)
+
+        bottom = QHBoxLayout()
+        bottom.setSpacing(8)
+        self.gauge = GaugeDial(0, GAUGE_MAX)
+        self.gauge.setFixedSize(POST_CARD_GAUGE_SIZE, POST_CARD_GAUGE_SIZE)
+        self.gauge.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
+        bottom.addWidget(self.gauge)
+
+        self.counts_lbl = QLabel("")
+        self.counts_lbl.setWordWrap(True)
+        self.counts_lbl.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
+        bottom.addWidget(self.counts_lbl, 1)
+        lay.addLayout(bottom)
+
+    def mousePressEvent(self, event) -> None:  # noqa: N802 (Qt naming)
+        if self._link:
+            QDesktopServices.openUrl(QUrl(self._link))
+        super().mousePressEvent(event)
+
+    def set_data(self, label: str, thumb: QPixmap | None, placeholder: str, text: str,
+                gauge_value: float, counts_text: str, link: str, tooltip: str) -> None:
+        self.name_lbl.setText(label)
+        if thumb is not None and not thumb.isNull():
+            self.thumb_lbl.setPixmap(thumb)
+        elif placeholder:
+            self.thumb_lbl.setText(placeholder)
+        else:
+            self.thumb_lbl.clear()
+        self.text_lbl.setText(text)
+        self.gauge.setValue(max(0, min(GAUGE_MAX, round(gauge_value))))
+        self.counts_lbl.setText(counts_text)
+        self._link = link
+        self.setToolTip(tooltip)
 
 
 class StatCard(Card):
