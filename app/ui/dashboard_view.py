@@ -14,10 +14,10 @@ from datetime import datetime
 from PySide6.QtCore import Qt, QUrl
 from PySide6.QtGui import QDesktopServices, QFont, QFontMetrics, QIcon, QPixmap
 from PySide6.QtWidgets import (
-    QAbstractItemView, QApplication, QButtonGroup, QDialog, QDialogButtonBox,
-    QFileDialog, QFrame, QGridLayout, QHBoxLayout, QHeaderView, QLabel, QMenu,
-    QMessageBox, QPlainTextEdit, QPushButton, QScrollArea, QTableWidget,
-    QTableWidgetItem, QVBoxLayout, QWidget,
+    QAbstractItemView, QApplication, QButtonGroup, QCheckBox, QDialog,
+    QDialogButtonBox, QFileDialog, QFrame, QGridLayout, QHBoxLayout,
+    QHeaderView, QLabel, QMenu, QMessageBox, QPlainTextEdit, QPushButton,
+    QScrollArea, QTableWidget, QTableWidgetItem, QVBoxLayout, QWidget,
 )
 
 from PySide6.QtCore import Signal
@@ -439,6 +439,13 @@ class DashboardView(QWidget):
 
     def _build_top_viral_table(self) -> None:
         self.top_viral_card = SectionCard(self.tr_("top_viral_title"))
+        viral_links_row = QHBoxLayout()
+        viral_links_row.addStretch(1)
+        self.top_viral_links_btn = QPushButton(self.tr_("cqi_tg_links"))
+        self.top_viral_links_btn.setToolTip(self.tr_("dash_links_hint"))
+        self.top_viral_links_btn.clicked.connect(self._on_top_viral_links_clicked)
+        viral_links_row.addWidget(self.top_viral_links_btn)
+        self.top_viral_card.body.addLayout(viral_links_row)
         self.top_viral_table = QTableWidget(0, 6)
         self.top_viral_table.setHorizontalHeaderLabels([
             self.tr_("col_date"), self.tr_("col_post"), self.tr_("col_views"),
@@ -455,6 +462,14 @@ class DashboardView(QWidget):
 
     def _build_trend_chart(self) -> None:
         self.trend_card = SectionCard(self.tr_("chart_trend_title"))
+        # On by default: the first and last bucket are almost always
+        # partial (the fetch window's start date rarely lands on the 1st,
+        # and the most recent month/season is still accumulating), so they
+        # read as a misleading dip/spike rather than real signal.
+        self.trend_trim_edges_chk = QCheckBox(self.tr_("chart_trim_edges"))
+        self.trend_trim_edges_chk.setChecked(True)
+        self.trend_trim_edges_chk.toggled.connect(lambda _c: self._rebuild_trend_chart())
+        self.trend_card.title_row.addWidget(self.trend_trim_edges_chk)
 
         self.trend_mode_season_btn = QPushButton(self.tr_("period_mode_season"))
         self.trend_mode_season_btn.setObjectName("ghost")
@@ -532,6 +547,13 @@ class DashboardView(QWidget):
 
     def _build_table(self) -> None:
         self.table_card = SectionCard(self.tr_("top_posts_title"))
+        table_links_row = QHBoxLayout()
+        table_links_row.addStretch(1)
+        self.table_links_btn = QPushButton(self.tr_("cqi_tg_links"))
+        self.table_links_btn.setToolTip(self.tr_("dash_links_hint"))
+        self.table_links_btn.clicked.connect(self._on_table_links_clicked)
+        table_links_row.addWidget(self.table_links_btn)
+        self.table_card.body.addLayout(table_links_row)
         self.table = QTableWidget(0, 6)
         self.table.setHorizontalHeaderLabels([
             self.tr_("col_date"), self.tr_("col_post"), self.tr_("col_views"),
@@ -761,6 +783,9 @@ class DashboardView(QWidget):
                     continue
                 period_keys.append((y, mo))
         quality = self._quality_series(period_keys)
+        if self.trend_trim_edges_chk.isChecked() and len(labels) > 2:
+            labels, views, reactions, shares, quality = (
+                labels[1:-1], views[1:-1], reactions[1:-1], shares[1:-1], quality[1:-1])
         all_series = {
             "views": {"label": self.tr_("col_views"), "color": COLORS["accent"], "values": views},
             "reactions": {"label": self.tr_("col_reactions"), "color": COLORS["weekday"],
@@ -972,6 +997,40 @@ class DashboardView(QWidget):
                 == QMessageBox.StandardButton.Yes:
             self.remove_requested.emit(self._data.get("key", ""))
 
+    # --------------------------------------------------------- links list
+    def _build_links_text(self, rows: list[dict], metric_key: str = "",
+                          metric_emoji: str = "") -> str:
+        lines = []
+        for i, r in enumerate(rows, 1):
+            text = " ".join((r.get("text") or "").split())
+            snippet = text[:30] + ("…" if len(text) > 30 else "")
+            link = build_post_link(self._channel_text, r.get("id", 0)).removeprefix("https://")
+            prefix = f"{fmt_int(r.get(metric_key, 0) or 0)}{metric_emoji} " if metric_key else ""
+            lines.append(f"{i}. {prefix}{snippet} {link}")
+        return "\n".join(lines)
+
+    def _on_top_viral_links_clicked(self) -> None:
+        if not self._rows:
+            QMessageBox.information(self, self.tr_("app_title"), self.tr_("report_empty"))
+            return
+        avg_views = self._data.get("stats", {}).get("avg_views", 0) or 0
+        rows = sorted(self._rows,
+                      key=lambda r: self._viral_rate(r.get("views", 0) or 0, avg_views),
+                      reverse=True)[:10]
+        text = self._build_links_text(rows, metric_key="forwards", metric_emoji="🔄")
+        ChannelReportDialog(self, self.i18n, text,
+                            title=self.tr_("cqi_tg_links_dialog_title")).exec()
+
+    def _on_table_links_clicked(self) -> None:
+        if not self._rows:
+            QMessageBox.information(self, self.tr_("app_title"), self.tr_("report_empty"))
+            return
+        rows = sorted(self._rows, key=lambda r: self._sort_value(r, self._sort_col),
+                      reverse=self._sort_desc)
+        text = self._build_links_text(rows, metric_key="reactions", metric_emoji="❤️")
+        ChannelReportDialog(self, self.i18n, text,
+                            title=self.tr_("cqi_tg_links_dialog_title")).exec()
+
     # ------------------------------------------------------------- exports
     def _show_report(self) -> None:
         if not self._rows:
@@ -1066,6 +1125,7 @@ class DashboardView(QWidget):
         self.refetch_btn.setText(self.tr_("dash_refresh"))
         self.remove_btn.setText(self.tr_("dash_remove"))
         self.trend_card.title_lbl.setText(self.tr_("chart_trend_title"))
+        self.trend_trim_edges_chk.setText(self.tr_("chart_trim_edges"))
         self.trend_mode_season_btn.setText(self.tr_("period_mode_season"))
         self.trend_mode_month_btn.setText(self.tr_("period_mode_month"))
         for key, title_key in (("views", "col_views"), ("reactions", "col_reactions"),
@@ -1078,10 +1138,14 @@ class DashboardView(QWidget):
         self.hour_card.set_title(self.tr_("chart_by_hour"))
         self.weekday_card.set_title(self.tr_("chart_by_weekday"))
         self.table_card.title_lbl.setText(self.tr_("top_posts_title"))
+        self.table_links_btn.setText(self.tr_("cqi_tg_links"))
+        self.table_links_btn.setToolTip(self.tr_("dash_links_hint"))
         self.table.setHorizontalHeaderLabels([
             self.tr_("col_date"), self.tr_("col_post"), self.tr_("col_views"),
             self.tr_("col_reactions"), self.tr_("col_private"), self.tr_("col_public")])
         self.top_viral_card.title_lbl.setText(self.tr_("top_viral_title"))
+        self.top_viral_links_btn.setText(self.tr_("cqi_tg_links"))
+        self.top_viral_links_btn.setToolTip(self.tr_("dash_links_hint"))
         self.top_viral_table.setHorizontalHeaderLabels([
             self.tr_("col_date"), self.tr_("col_post"), self.tr_("col_views"),
             self.tr_("col_reactions"), self.tr_("col_private"), self.tr_("col_viral_rate")])

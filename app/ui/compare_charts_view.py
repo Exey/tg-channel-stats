@@ -19,8 +19,8 @@ from datetime import datetime
 
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
-    QButtonGroup, QHBoxLayout, QLabel, QPushButton, QScrollArea, QVBoxLayout,
-    QWidget,
+    QButtonGroup, QCheckBox, QHBoxLayout, QLabel, QPushButton, QScrollArea,
+    QVBoxLayout, QWidget,
 )
 
 from ..periods import period_key_label
@@ -129,14 +129,26 @@ class CompareChartsView(QWidget):
 
         self._charts: dict[str, MultiLineChart] = {}
         self._cards: dict[str, ChartCard] = {}
+        self._trim_edges_chks: dict[str, QCheckBox] = {}
         for key, title_key in _METRICS:
             chart = MultiLineChart(shared_scale=True)  # same metric across channels -> one fair axis
             chart.setMinimumHeight(280)
             card = ChartCard(self.tr_(title_key), chart)
             card.setMinimumHeight(340)
+            # On by default: the first and last bucket are almost always
+            # partial (the fetch window's start date rarely lands on the
+            # 1st, and the most recent month/season is still accumulating),
+            # so they read as a misleading dip/spike rather than real
+            # signal. Independent per chart, same as the single-channel
+            # dashboard's own version of this checkbox.
+            chk = QCheckBox(self.tr_("chart_trim_edges"))
+            chk.setChecked(True)
+            chk.toggled.connect(lambda _c: self._rebuild_charts())
+            card.title_row.addWidget(chk)
             self.body.addWidget(card)
             self._charts[key] = chart
             self._cards[key] = card
+            self._trim_edges_chks[key] = chk
 
         # Widgets above exist now, so it's safe to wire signals and set the
         # default mode (which fires the toggle once).
@@ -223,7 +235,12 @@ class CompareChartsView(QWidget):
                 else:
                     values = [buckets.get(k, {}).get(metric, 0) for k in keys]
                 series.append({"label": name, "color": color, "values": values})
-            self._charts[metric].set_data(series, labels, empty_text=self.tr_("chart_empty"))
+            metric_labels = labels
+            if self._trim_edges_chks[metric].isChecked() and len(metric_labels) > 2:
+                metric_labels = metric_labels[1:-1]
+                for s in series:
+                    s["values"] = s["values"][1:-1]
+            self._charts[metric].set_data(series, metric_labels, empty_text=self.tr_("chart_empty"))
 
     def _quality_series_for_channel(self, data: dict, keys: list[tuple]) -> list[float]:
         """Average post-quality gauge score (app.scoring) per period key,
@@ -251,3 +268,4 @@ class CompareChartsView(QWidget):
         self.empty_lbl.setText(self.tr_("compare_charts_empty"))
         for key, title_key in _METRICS:
             self._cards[key].set_title(self.tr_(title_key))
+            self._trim_edges_chks[key].setText(self.tr_("chart_trim_edges"))

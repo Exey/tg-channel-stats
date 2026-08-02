@@ -275,16 +275,22 @@ class StatCard(Card):
 
 
 class ChartCard(Card):
-    """A titled card that hosts a chart (or any content widget)."""
+    """A titled card that hosts a chart (or any content widget). `title_row`
+    is exposed so callers can addWidget() extra controls (e.g. a checkbox)
+    to the right of the title — it already ends in a stretch, so anything
+    added lands flush right."""
 
     def __init__(self, title: str, content: QWidget, parent=None) -> None:
         super().__init__(parent)
         lay = QVBoxLayout(self)
         lay.setContentsMargins(20, 18, 20, 18)
         lay.setSpacing(12)
+        self.title_row = QHBoxLayout()
         self.title_lbl = QLabel(title)
         self.title_lbl.setObjectName("sectionTitle")
-        lay.addWidget(self.title_lbl)
+        self.title_row.addWidget(self.title_lbl)
+        self.title_row.addStretch(1)
+        lay.addLayout(self.title_row)
         lay.addWidget(content, 1)
         self.content = content
 
@@ -293,17 +299,23 @@ class ChartCard(Card):
 
 
 class SectionCard(Card):
-    """A titled card with a vertical body layout callers fill in."""
+    """A titled card with a vertical body layout callers fill in. `title_row`
+    is exposed so callers can addWidget() extra controls (e.g. a checkbox)
+    to the right of the title — it already ends in a stretch, so anything
+    added lands flush right."""
 
     def __init__(self, title: str = "", parent=None) -> None:
         super().__init__(parent)
         self.body = QVBoxLayout(self)
         self.body.setContentsMargins(20, 18, 20, 18)
         self.body.setSpacing(12)
+        self.title_row = QHBoxLayout()
         self.title_lbl = QLabel(title)
         self.title_lbl.setObjectName("sectionTitle")
         self.title_lbl.setVisible(bool(title))
-        self.body.addWidget(self.title_lbl)
+        self.title_row.addWidget(self.title_lbl)
+        self.title_row.addStretch(1)
+        self.body.addLayout(self.title_row)
 
 
 class NavButton(QPushButton):

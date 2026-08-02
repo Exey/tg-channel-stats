@@ -251,6 +251,7 @@ EN = {
     # charts
     "chart_trend_title": "Views / Reactions / Shares over time",
     "chart_quality": "Quality",
+    "chart_trim_edges": "Hide first/last month",
     "chart_by_hour": "Posts by hour of day",
     "chart_by_weekday": "Posts by day of week",
     "dash_recent_posts_title": "Last 50 Posts",
@@ -261,6 +262,8 @@ EN = {
     # top posts table (from channel_top)
     "top_posts_title": "Top posts",
     "top_viral_title": "Top viral posts",
+    "dash_links_hint": "Generate a copyable text list of links to the "
+                       "posts shown below.",
     "col_date": "Date",
     "col_post": "Post",
     "col_views": "Views",
@@ -530,6 +533,7 @@ RU = {
                            "больше среднего числа просмотров.",
     "chart_trend_title": "Просмотры / Реакции / Репосты по времени",
     "chart_quality": "Качество",
+    "chart_trim_edges": "Скрыть первый/последний месяц",
     "chart_by_hour": "Посты по часам суток",
     "dash_recent_posts_title": "Последние 50 постов",
     "chart_by_weekday": "Посты по дням недели",
@@ -538,6 +542,8 @@ RU = {
     "wd_fri": "Пт", "wd_sat": "Сб", "wd_sun": "Вс",
     "top_posts_title": "Топ постов",
     "top_viral_title": "Топ виральных постов",
+    "dash_links_hint": "Сформировать копируемый текстовый список ссылок "
+                       "на посты ниже.",
     "col_date": "Дата",
     "col_post": "Пост",
     "col_views": "Просмотры",
