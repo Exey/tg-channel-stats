@@ -26,9 +26,13 @@ POST_CARD_TEXT_LINES = 2
 POST_CARD_TEXT_WIDTH = POST_CARD_WIDTH - 20   # card's own left+right content margins
 
 # media_type (see channel_stat.py) -> placeholder icon shown until a real
-# thumbnail is fetched; "" (text-only post, or an older checkpoint that
-# predates this field) shows no icon at all.
-POST_CARD_PLACEHOLDERS = {"photo": "🏞️", "video": "▶️", "video_note": "⚪️"}
+# thumbnail is fetched; "" is both a genuine text-only post and an older
+# checkpoint that predates this field — either way, 📖 is the reasonable
+# default rather than leaving the card's thumb area blank.
+POST_CARD_PLACEHOLDERS = {
+    "photo": "🏞️", "video": "▶️", "video_note": "⚪️",
+    "audio": "🎙️", "file": "💾", "": "📖",
+}
 
 
 def elide_to_lines(text: str, width: int, max_lines: int, pixel_size: int) -> str:

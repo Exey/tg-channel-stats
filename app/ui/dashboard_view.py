@@ -12,7 +12,7 @@ import re
 from datetime import datetime
 
 from PySide6.QtCore import Qt, QUrl
-from PySide6.QtGui import QDesktopServices, QIcon, QPixmap
+from PySide6.QtGui import QDesktopServices, QFont, QFontMetrics, QIcon, QPixmap
 from PySide6.QtWidgets import (
     QAbstractItemView, QApplication, QButtonGroup, QDialog, QDialogButtonBox,
     QFileDialog, QFrame, QGridLayout, QHBoxLayout, QHeaderView, QLabel, QMenu,
@@ -43,6 +43,9 @@ MONTHS_SHORT = ["", "Jan", "Feb", "Mar", "Apr", "May", "Jun",
 
 LAST_FULL_YEAR = datetime.now().year - 1
 RECENT_POSTS_COUNT = 50
+
+_MEDIA_LOG_WIDTH = 260
+_MEDIA_LOG_PIXEL_SIZE = 12   # matches QLabel#hint's font-size in theme.py
 
 # card key -> i18n key for an explanatory tooltip (same cards/logic as compare mode).
 _CARD_TOOLTIPS = {
@@ -301,6 +304,16 @@ class DashboardView(QWidget):
         self.recent_posts_card = SectionCard(self.tr_("dash_recent_posts_title"))
         fetch_row = QHBoxLayout()
         fetch_row.addStretch(1)
+        # Last message from the running (or just-finished) media fetch —
+        # mainly so a FloodWait cooldown ("FloodWait: sleeping 30s…", see
+        # app.tools.common.retry) is visible instead of the button just
+        # looking stuck, same as High-Quality Posts. Worth having here too
+        # now that this fetches RECENT_POSTS_COUNT posts, not just a
+        # handful — long enough to actually hit a cooldown.
+        self.media_log_lbl = QLabel("")
+        self.media_log_lbl.setObjectName("hint")
+        self.media_log_lbl.setFixedWidth(_MEDIA_LOG_WIDTH)
+        fetch_row.addWidget(self.media_log_lbl)
         self.fetch_media_btn = QPushButton(self.tr_("cqi_fetch_media"))
         self.fetch_media_btn.setToolTip(self.tr_("cqi_fetch_media_hint"))
         self.fetch_media_btn.clicked.connect(self._on_fetch_media_clicked)
@@ -367,8 +380,7 @@ class DashboardView(QWidget):
     # ------------------------------------------------------- fetch media
     def _on_fetch_media_clicked(self) -> None:
         """Same on-demand thumbnail fetch as High-Quality Posts (see
-        app.tools.media_fetch) — just for the cards shown above, and
-        without that view's FloodWait status line."""
+        app.tools.media_fetch) — just for the cards shown above."""
         rows = sorted(self._rows, key=lambda r: r.get("ts", 0), reverse=True)[:RECENT_POSTS_COUNT]
         if not rows or self._media_worker is not None:
             return
@@ -387,10 +399,25 @@ class DashboardView(QWidget):
                  "ids": r.get("ids") or [r.get("id", 0)]} for r in rows]
         self.fetch_media_btn.setEnabled(False)
         self.fetch_media_btn.setText(self.tr_("cqi_fetch_media_running"))
+        self._set_media_log("")
         self._media_worker = ToolWorker(run_thumbnail_cache, {"posts": posts}, conn, parent=self)
+        self._media_worker.sig_log.connect(self._set_media_log)
         self._media_worker.sig_ask.connect(self._on_media_ask)
         self._media_worker.sig_done.connect(self._on_fetch_media_done)
         self._media_worker.start()
+
+    def _set_media_log(self, msg: str) -> None:
+        # Measured with a fresh QFont at the QSS pixel size, not the
+        # label's own .fontMetrics() — an unpolished widget's QFont doesn't
+        # yet reflect the global QSS font-size rule (same issue worked
+        # through for High-Quality Posts' identical label).
+        msg = msg.strip()
+        font = QFont()
+        font.setPixelSize(_MEDIA_LOG_PIXEL_SIZE)
+        elided = QFontMetrics(font).elidedText(
+            msg, Qt.TextElideMode.ElideRight, _MEDIA_LOG_WIDTH)
+        self.media_log_lbl.setText(elided)
+        self.media_log_lbl.setToolTip(msg)
 
     def _on_media_ask(self, _kind: str, _prompt: str) -> None:
         # Same assumption as High-Quality Posts: this button relies on the

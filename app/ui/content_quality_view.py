@@ -22,12 +22,15 @@ Thumbnails are opt-in: nothing in this app downloads post media by default
 button runs a small on-demand background job (app.tools.media_fetch) that
 downloads just the *smallest* thumbnail (photo, video, or round/circle
 video note) for the posts currently on screen into a local cache
-(app.media_cache). A card without a cached thumbnail shows a placeholder
-icon by media type instead (🏞️ photo, ▶️ video, ⚪️ circle message, or
-nothing for a text-only post). Both `media_type` and `comments` are new
-per-row checkpoint fields (see channel_stat.py) — posts from a checkpoint
-fetched before they existed just show no placeholder icon and 0 comments
-until refetched.
+(app.media_cache) — a voice message, audio file or other document never
+gets a real thumbnail fetched at all, just its static placeholder below,
+since none of those have a meaningful visual preview. A card without a
+cached thumbnail shows a placeholder icon by media type instead (🏞️
+photo, ▶️ video, ⚪️ circle message, 🎙️ voice/audio, 💾 other file, 📖
+text-only post). Both `media_type` and `comments` are new per-row
+checkpoint fields (see channel_stat.py) — posts from a checkpoint fetched
+before they existed show the 📖 placeholder (same as a genuine text post)
+and 0 comments until refetched.
 """
 from __future__ import annotations
 

@@ -61,17 +61,24 @@ def _comment_total(msg) -> int:
 
 
 def _media_type(msg) -> str:
-    """"photo" | "video" | "video_note" (round/circle video) | "" — used
-    by the High-Quality Posts view to pick a placeholder icon before a
-    thumbnail is fetched (see app.tools.media_fetch). Checked in this
-    order since a round video is technically also a "video" in Telethon's
-    eyes, and needs to be told apart from a regular one."""
+    """"photo" | "video" | "video_note" (round/circle video) | "audio"
+    (voice message or audio file) | "file" (any other document) | "" — used
+    by the High-Quality Posts view (and the dashboard's recent-posts row)
+    to pick a placeholder icon before a thumbnail is fetched (see
+    app.tools.media_fetch). Checked in this order since a round video is
+    technically also a "video", and a voice message/audio file/photo/video
+    are all technically also a "document", in Telethon's eyes — the more
+    specific convenience property always has to be checked first."""
     if getattr(msg, "video_note", None) is not None:
         return "video_note"
     if getattr(msg, "video", None) is not None:
         return "video"
     if getattr(msg, "photo", None) is not None:
         return "photo"
+    if getattr(msg, "voice", None) is not None or getattr(msg, "audio", None) is not None:
+        return "audio"
+    if getattr(msg, "document", None) is not None:
+        return "file"
     return ""
 
 
