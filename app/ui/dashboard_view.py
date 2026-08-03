@@ -373,7 +373,7 @@ class DashboardView(QWidget):
                                     raw_score, gauge_value, fmt_int)
 
             card.set_data(date_label, thumb, placeholder, text, gauge_value,
-                         counts_text, link, tooltip)
+                         counts_text, link, tooltip, media_counts=row.get("media_counts"))
             self.recent_posts_lay.addWidget(card)
         self.recent_posts_lay.addStretch(1)
 

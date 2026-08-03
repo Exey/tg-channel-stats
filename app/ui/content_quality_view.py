@@ -13,9 +13,11 @@ other, so there's no risk of a circular import between them.
 
 Posts come from each channel's checkpoint `rows` — the stored top-N sample
 (see folder_stat_view's module docstring), not a fresh fetch — filtered to
-the selected period (Seasonal/Monthly/All time, same picker as Folder
-Stats, backed by app.periods) and capped at MAX_POSTS_SHOWN to keep the
-grid manageable for an "All time" view across a big folder.
+the selected period (Seasonal/Monthly/Year, same picker as Folder Stats,
+backed by app.periods), scored and sorted best-first, then capped at
+MAX_POSTS_SHOWN in _channel_limited_entries() (after the per-channel
+limit, not before — see that method's docstring) to keep the grid
+manageable for a big folder/period.
 
 Thumbnails are opt-in: nothing in this app downloads post media by default
 (checkpoints only ever store text/counts), so the header's "Fetch media"
@@ -39,8 +41,8 @@ from datetime import datetime
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QFont, QFontMetrics, QPixmap
 from PySide6.QtWidgets import (
-    QButtonGroup, QComboBox, QFrame, QGridLayout, QHBoxLayout, QLabel,
-    QMessageBox, QPushButton, QScrollArea, QVBoxLayout, QWidget,
+    QButtonGroup, QCheckBox, QComboBox, QFrame, QGridLayout, QHBoxLayout,
+    QLabel, QMessageBox, QPushButton, QScrollArea, QVBoxLayout, QWidget,
 )
 
 from ..config import Config
@@ -62,7 +64,7 @@ from .widgets import (
 _GRID_SPACING = 14
 _PAGE_MARGIN_LEFT = 34
 _PAGE_MARGIN_RIGHT = 40
-MAX_POSTS_SHOWN = 60   # keeps "All time" across a big folder from being huge
+MAX_POSTS_SHOWN = 50   # keeps a big folder/period from being an unbounded grid
 MONTHS_FULL = ["", "January", "February", "March", "April", "May", "June",
                "July", "August", "September", "October", "November", "December"]
 
@@ -175,16 +177,18 @@ class ContentQualityView(QWidget):
         for n in (7, 6, 5, 4, 3, 2):
             self.tg_links_limit_combo.addItem(self.tr_("cqi_tg_links_limit_n", n=n), n)
         header.addWidget(self.tg_links_limit_combo)
+        # Off by default — a text-only post still has a real ERV% score and
+        # may well be one of the best-ranked ones; this just lets you focus
+        # on media when that's what you're after (e.g. before a "Fetch
+        # media" pass, or when hunting for repost-worthy visuals).
+        self.hide_non_media_chk = QCheckBox(self.tr_("cqi_hide_non_media"))
+        self.hide_non_media_chk.setToolTip(self.tr_("cqi_hide_non_media_hint"))
+        header.addWidget(self.hide_non_media_chk)
         page.addLayout(header)
 
-        pick_row = QHBoxLayout()
-        self.pick_lbl = QLabel(self.tr_("folder_stat_pick_folder"))
-        pick_row.addWidget(self.pick_lbl)
-        self.folder_combo = QComboBox()
-        self.folder_combo.currentIndexChanged.connect(self._on_folder_changed)
-        pick_row.addWidget(self.folder_combo, 1)
-        page.addLayout(pick_row)
-
+        # One row: period mode on the left, folder picker on the right —
+        # they're unrelated controls but both narrow, so sharing a row
+        # keeps the header more compact than stacking each on its own line.
         self.mode_season_btn = QPushButton(self.tr_("period_mode_season"))
         self.mode_season_btn.setObjectName("ghost")
         self.mode_season_btn.setCheckable(True)
@@ -203,7 +207,13 @@ class ContentQualityView(QWidget):
         mode_row.addWidget(self.mode_season_btn)
         mode_row.addWidget(self.mode_month_btn)
         mode_row.addWidget(self.mode_year_btn)
-        mode_row.addStretch()
+        mode_row.addStretch(1)
+        self.pick_lbl = QLabel(self.tr_("folder_stat_pick_folder"))
+        mode_row.addWidget(self.pick_lbl)
+        self.folder_combo = QComboBox()
+        self.folder_combo.currentIndexChanged.connect(self._on_folder_changed)
+        self.folder_combo.setMinimumWidth(220)
+        mode_row.addWidget(self.folder_combo)
         page.addLayout(mode_row)
 
         self.picker_container = QWidget()
@@ -244,6 +254,7 @@ class ContentQualityView(QWidget):
         self.mode_year_btn.toggled.connect(lambda c: self._on_mode_toggled("year", c))
         self.mode_season_btn.setChecked(True)
         self.tg_links_limit_combo.currentIndexChanged.connect(self._on_channel_limit_changed)
+        self.hide_non_media_chk.toggled.connect(lambda _c: self._rebuild_cards())
 
     def resizeEvent(self, event) -> None:  # noqa: N802 (Qt naming)
         super().resizeEvent(event)
@@ -479,8 +490,16 @@ class ContentQualityView(QWidget):
     # ----------------------------------------------------------- posts
     def _collect_posts(self) -> list[dict]:
         """Every stored row across the selected folder's channels that
-        falls in the selected period, each scored — sorted best-first,
-        capped at MAX_POSTS_SHOWN."""
+        falls in the selected period, each scored — sorted best-first.
+
+        Deliberately NOT capped at MAX_POSTS_SHOWN here: that cap is applied
+        in _channel_limited_entries() instead, *after* the per-channel
+        limit — capping here first would let a restrictive per-channel
+        limit (e.g. "2 per ch") starve the grid down to far fewer than
+        MAX_POSTS_SHOWN cards just because the best 60-ish posts overall
+        happened to cluster in a handful of channels, when there are
+        plenty more further down this full ranked list to fill the rest
+        of the quota from."""
         mode = self._period_mode
         target_key = self._selected_period_key
         cutoff = year_window_cutoff(self._year_window_days()) if mode == "year" else None
@@ -501,28 +520,37 @@ class ContentQualityView(QWidget):
                 posts.append({"channel": ch, "row": row,
                              "raw_score": post_score_raw(row, _channel_avg_views(ch))})
         posts.sort(key=lambda p: p["raw_score"], reverse=True)
-        return posts[:MAX_POSTS_SHOWN]
+        return posts
 
     def _rebuild_posts(self) -> None:
         self._post_entries = self._collect_posts() if self._channels else []
         self._rebuild_cards()
 
     def _channel_limited_entries(self) -> list[dict]:
-        """`self._post_entries` (already best-first) capped to at most N
-        posts per channel, N = the Tg Links limit combo's current value (0
-        = no cap) — shared by the grid and the generated Tg Links list so
-        both always agree on which posts are "in scope"."""
+        """`self._post_entries` (already best-first, unbounded — see
+        _collect_posts) capped to at most N posts per channel, N = the Tg
+        Links limit combo's current value (0 = no cap), *and* to at most
+        MAX_POSTS_SHOWN posts overall — shared by the grid and the
+        generated Tg Links list so both always agree on which posts are
+        "in scope". Applying the per-channel cap here, before the overall
+        cap, means a restrictive limit still fills up to MAX_POSTS_SHOWN
+        by reaching further down the ranked list across other channels,
+        the same as when no limit is set at all."""
         limit = int(self.tg_links_limit_combo.currentData() or 0)
-        if not limit:
-            return self._post_entries
+        hide_non_media = self.hide_non_media_chk.isChecked()
         seen: dict[str, int] = {}
         out: list[dict] = []
         for entry in self._post_entries:
-            key = _channel_ref(entry["channel"])
-            count = seen.get(key, 0)
-            if count >= limit:
+            if len(out) >= MAX_POSTS_SHOWN:
+                break
+            if hide_non_media and not (entry["row"].get("media_type") or ""):
                 continue
-            seen[key] = count + 1
+            if limit:
+                key = _channel_ref(entry["channel"])
+                count = seen.get(key, 0)
+                if count >= limit:
+                    continue
+                seen[key] = count + 1
             out.append(entry)
         return out
 
@@ -580,7 +608,7 @@ class ContentQualityView(QWidget):
                                     entry["raw_score"], gauge_value, fmt_int)
 
             card.set_data(label, thumb, placeholder, text, gauge_value, counts_text,
-                         link, tooltip)
+                         link, tooltip, media_counts=row.get("media_counts"))
             self._cards.append(card)
 
         self._cols = 0  # force _relayout_grid to actually place the new cards
@@ -707,6 +735,8 @@ class ContentQualityView(QWidget):
         for i in range(1, self.tg_links_limit_combo.count()):
             n = self.tg_links_limit_combo.itemData(i)
             self.tg_links_limit_combo.setItemText(i, self.tr_("cqi_tg_links_limit_n", n=n))
+        self.hide_non_media_chk.setText(self.tr_("cqi_hide_non_media"))
+        self.hide_non_media_chk.setToolTip(self.tr_("cqi_hide_non_media_hint"))
         self.pick_lbl.setText(self.tr_("folder_stat_pick_folder"))
         self.no_folders_lbl.setText(self.tr_("folder_stat_no_folders"))
         self.empty_channels_lbl.setText(self.tr_("folder_stat_empty_channels"))

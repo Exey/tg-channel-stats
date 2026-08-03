@@ -118,6 +118,10 @@ EN = {
                                "are shown below and in the Tg Links list.",
     "cqi_tg_links_limit_none": "No limit",
     "cqi_tg_links_limit_n": "{n} per ch",
+    "cqi_hide_non_media": "Hide non-media posts",
+    "cqi_hide_non_media_hint": "Hide text-only posts (no photo, video, "
+                               "voice/audio or other file) from the grid, "
+                               "the per-channel limit and the Tg Links list.",
     # compare charts view
     "nav_compare_charts": "📈 Compare Charts",
     "nav_compare_charts_hint": "Pick up to 8 channels to compare on charts.",
@@ -409,6 +413,10 @@ RU = {
                                "и в списке ссылок.",
     "cqi_tg_links_limit_none": "Без ограничения",
     "cqi_tg_links_limit_n": "{n} с канала",
+    "cqi_hide_non_media": "Скрыть посты без медиа",
+    "cqi_hide_non_media_hint": "Скрыть текстовые посты (без фото, видео, "
+                               "голосового/аудио или другого файла) из "
+                               "сетки, лимита по каналу и списка ссылок.",
     # compare charts view
     "nav_compare_charts": "📈 Сравнить на графиках",
     "nav_compare_charts_hint": "Выберите до 8 каналов для сравнения на графиках.",

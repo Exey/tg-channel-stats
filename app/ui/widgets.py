@@ -33,6 +33,18 @@ POST_CARD_PLACEHOLDERS = {
     "photo": "🏞️", "video": "▶️", "video_note": "⚪️",
     "audio": "🎙️", "file": "💾", "": "📖",
 }
+_MEDIA_COUNT_ORDER = ["photo", "video", "video_note", "audio", "file"]
+
+
+def format_media_counts(media_counts: dict) -> str:
+    """"×7🏞️" for a 7-photo album, "×2🏞️ ×2▶️" for a mixed one, "×1▶️"
+    for a single video — shown even at ×1 because a real cached thumbnail
+    is just a static frame either way, so it's the only on-card indicator
+    of which media type it actually is (a placeholder emoji alone already
+    makes that obvious, but a real thumbnail doesn't)."""
+    parts = [f"×{media_counts[mt]}{POST_CARD_PLACEHOLDERS[mt]}"
+             for mt in _MEDIA_COUNT_ORDER if media_counts.get(mt, 0) >= 1]
+    return " ".join(parts)
 
 
 def elide_to_lines(text: str, width: int, max_lines: int, pixel_size: int) -> str:
@@ -140,6 +152,23 @@ class PostCard(Card):
         self.thumb_lbl.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
         lay.addWidget(self.thumb_lbl)
 
+        # Album media-count badge (e.g. "×7🏞️", "×2🏞️ ×2▶️") — a child
+        # layout on thumb_lbl itself rather than a sibling, so it overlays
+        # the thumbnail/placeholder instead of taking its own row; QLabel's
+        # own pixmap/text paint independently of any child widgets placed
+        # on it via a layout, so this works whether the card is showing a
+        # real cached thumbnail or a placeholder emoji.
+        overlay_lay = QHBoxLayout(self.thumb_lbl)
+        overlay_lay.setContentsMargins(0, 0, 6, 0)
+        overlay_lay.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+        self.media_overlay_lbl = QLabel()
+        self.media_overlay_lbl.setStyleSheet(
+            "background: rgba(0, 0, 0, 150); color: white; border-radius: 4px; "
+            "padding: 1px 5px; font-size: 10px; font-weight: 600;")
+        self.media_overlay_lbl.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
+        self.media_overlay_lbl.setVisible(False)
+        overlay_lay.addWidget(self.media_overlay_lbl)
+
         # Text is pre-wrapped to exactly 2 lines with a trailing "…" by
         # elide_to_lines (QLabel can't natively elide after N *wrapped*
         # lines, only a single line) — wordWrap off since the line breaks
@@ -173,7 +202,8 @@ class PostCard(Card):
         super().mousePressEvent(event)
 
     def set_data(self, label: str, thumb: QPixmap | None, placeholder: str, text: str,
-                gauge_value: float, counts_text: str, link: str, tooltip: str) -> None:
+                gauge_value: float, counts_text: str, link: str, tooltip: str,
+                media_counts: dict | None = None) -> None:
         self.name_lbl.setText(label)
         if thumb is not None and not thumb.isNull():
             self.thumb_lbl.setPixmap(thumb)
@@ -181,6 +211,9 @@ class PostCard(Card):
             self.thumb_lbl.setText(placeholder)
         else:
             self.thumb_lbl.clear()
+        overlay_text = format_media_counts(media_counts or {})
+        self.media_overlay_lbl.setText(overlay_text)
+        self.media_overlay_lbl.setVisible(bool(overlay_text))
         self.text_lbl.setText(text)
         self.gauge.setValue(max(0, min(GAUGE_MAX, round(gauge_value))))
         self.counts_lbl.setText(counts_text)

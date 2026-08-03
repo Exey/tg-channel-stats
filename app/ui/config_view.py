@@ -27,7 +27,7 @@ from .folder_dialog import FolderManagerDialog
 from .qr_login_dialog import QrLoginDialog
 from .widgets import Card, SectionCard
 
-PERIOD_KEYS = ["3m", "6m", "1y", "2y", "3y", "all"]
+PERIOD_KEYS = ["2y", "3y", "all"]
 
 
 class ConfigView(QWidget):
@@ -167,7 +167,7 @@ class ConfigView(QWidget):
 
         self.period_combo = QComboBox()
         self.period_combo.addItems([self.tr_(f"period_{k}") for k in PERIOD_KEYS])
-        self.period_combo.setCurrentIndex(3)  # 2 years
+        self.period_combo.setCurrentIndex(0)  # 2 years
         self.fetch_form.addRow(self.tr_("fetch_period"), self.period_combo)
         card.body.addLayout(self.fetch_form)
 

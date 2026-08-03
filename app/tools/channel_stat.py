@@ -378,6 +378,7 @@ async def run_channel_stat(client, p: dict, ctx) -> str:
         reactions = _reaction_total(msg)
         forwards = int(getattr(msg, "forwards", 0) or 0)
         comments = _comment_total(msg)
+        media_type = _media_type(msg)
 
         if gid is not None and gid == current_gid:
             # Same album — merge into the row being built (see channel_top).
@@ -387,6 +388,9 @@ async def run_channel_stat(client, p: dict, ctx) -> str:
             current["reactions"] = max(current["reactions"], reactions)
             current["forwards"] = max(current["forwards"], forwards)
             current["comments"] = max(current["comments"], comments)
+            if media_type:
+                current["media_counts"][media_type] = (
+                    current["media_counts"].get(media_type, 0) + 1)
             if not current["text"] and text:
                 current["text"] = text
                 current["full_text"] = full_text
@@ -407,7 +411,13 @@ async def run_channel_stat(client, p: dict, ctx) -> str:
                 # From the anchor message only, like date/ts — an album's
                 # other members aren't re-checked, matching the "cover"
                 # item a viewer would actually see first.
-                "media_type": _media_type(msg),
+                "media_type": media_type,
+                # Unlike media_type above, this DOES tally every album
+                # member (see the merge branch) — {"photo": 7} for a
+                # 7-photo album, {"photo": 2, "video": 2} for a mixed one —
+                # so the High-Quality Posts grid can show "×7🏞️" etc. on
+                # the card instead of just the cover item's single icon.
+                "media_counts": {media_type: 1} if media_type else {},
                 "public": None,
             }
             current_gid = gid
