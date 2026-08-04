@@ -9,6 +9,7 @@ EN = {
     "nav_compare": "⭐ Compare Metrics",
     "nav_compare_hint": "Pick 2-8 channels to compare.",
     "nav_sort_folders": "Sort by Members",
+    "nav_sort_folders_active": "Sort by Folders",
     "nav_sort_folders_hint": "Group the channel list by folder (folder "
                             "order, unassigned last), sorted by followers "
                             "within each group — instead of one flat list "
@@ -316,6 +317,7 @@ RU = {
     "nav_compare": "⭐ Сравнить метрики",
     "nav_compare_hint": "Выберите 2-8 каналов для сравнения.",
     "nav_sort_folders": "Сорт. по подпис.",
+    "nav_sort_folders_active": "Сорт. по папкам",
     "nav_sort_folders_hint": "Группировать список каналов по папкам (в "
                             "порядке папок, без папки — в конце), внутри "
                             "каждой группы — по убыванию подписчиков, "

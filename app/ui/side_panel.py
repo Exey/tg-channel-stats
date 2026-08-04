@@ -207,7 +207,15 @@ class SidePanel(QFrame):
 
     def _on_sort_folders_toggled(self, on: bool) -> None:
         self.sort_by_folder = on
+        self._sync_sort_folders_label()
         self.set_channels(self._last_channels)
+
+    def _sync_sort_folders_label(self) -> None:
+        # Label describes what the button does FROM here: "Sort by Members"
+        # (flat, off) vs "Sort by Folders" (grouped, on) — see
+        # FolderStore.sorted_by_folder for the actual ordering.
+        key = "nav_sort_folders_active" if self.sort_by_folder else "nav_sort_folders"
+        self.sort_folders_btn.setText(self.i18n.tr(key))
 
     # -------------------------------------------------------------- folders
     def refresh_folder_dots(self) -> None:
@@ -354,7 +362,7 @@ class SidePanel(QFrame):
         self.empty_lbl.setText(self.i18n.tr("nav_no_channels"))
         self.compare_btn.setText(self.i18n.tr("nav_compare"))
         self.compare_btn.setToolTip(self.i18n.tr("nav_compare_hint"))
-        self.sort_folders_btn.setText(self.i18n.tr("nav_sort_folders"))
+        self._sync_sort_folders_label()
         self.sort_folders_btn.setToolTip(self.i18n.tr("nav_sort_folders_hint"))
         self.compare_charts_btn.setText(self.i18n.tr("nav_compare_charts"))
         self.compare_charts_btn.setToolTip(self.i18n.tr("nav_compare_charts_hint"))
