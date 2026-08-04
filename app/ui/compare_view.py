@@ -10,8 +10,8 @@ from datetime import datetime
 
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
-    QFileDialog, QHBoxLayout, QLabel, QMessageBox, QScrollArea, QStackedLayout,
-    QVBoxLayout, QWidget,
+    QFileDialog, QHBoxLayout, QLabel, QMessageBox, QPushButton, QScrollArea,
+    QStackedLayout, QVBoxLayout, QWidget,
 )
 
 from .dashboard_view import fmt_int, short_num
@@ -65,6 +65,8 @@ class CompareView(QWidget):
         return title
 
     def retranslate(self) -> None:
+        self.md_btn.setText(self.tr_("save_md_button"))
+        self.md_btn.setToolTip(self.tr_("nav_compare_md_hint"))
         for key, title_key in _METRICS:
             title = self._metric_title(key, title_key)
             tip = self.tr_(_TOOLTIPS[key]) if key in _TOOLTIPS else ""
@@ -75,7 +77,15 @@ class CompareView(QWidget):
             col["section_lbl"].setText(self.tr_("compare_content_quality"))
 
     def _build_ui(self) -> None:
-        outer = QVBoxLayout(self)
+        # Root is a StackAll QStackedLayout — same overlay technique as the
+        # per-column crown emoji below — so the "Save MD" button can float
+        # over the top-left corner without becoming part of (or disturbing)
+        # the real content layout at all.
+        root_stack = QStackedLayout(self)
+        root_stack.setStackingMode(QStackedLayout.StackingMode.StackAll)
+
+        content = QWidget()
+        outer = QVBoxLayout(content)
         outer.setContentsMargins(34, 16, 40, 24)
         outer.setSpacing(16)
 
@@ -148,6 +158,24 @@ class CompareView(QWidget):
             self._columns.append({"holder": holder, "name": name_lbl,
                                   "crown": crown_lbl, "username": username_lbl,
                                   "cards": cards, "section_lbl": section_lbl})
+
+        root_stack.addWidget(content)
+
+        # Overlay layer: WA_TransparentForMouseEvents on the *container*
+        # (not the button — a child widget still gets its own clicks
+        # regardless of its parent's transparency) so clicks/scrolling on
+        # the real content underneath keep working everywhere outside the
+        # button's own small rect.
+        overlay = QWidget()
+        overlay.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
+        overlay_lay = QVBoxLayout(overlay)
+        overlay_lay.setContentsMargins(20, 12, 0, 0)
+        overlay_lay.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop)
+        self.md_btn = QPushButton(self.tr_("save_md_button"))
+        self.md_btn.setToolTip(self.tr_("nav_compare_md_hint"))
+        self.md_btn.clicked.connect(self.save_markdown)
+        overlay_lay.addWidget(self.md_btn)
+        root_stack.addWidget(overlay)
 
     def load(self, datas: list[dict]) -> None:
         datas = datas[:MAX_COMPARE]

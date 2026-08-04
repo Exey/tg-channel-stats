@@ -29,7 +29,6 @@ class SidePanel(QFrame):
     channel_selected = Signal(str)   # checkpoint key
     compare_requested = Signal(list)  # 2-8 checkpoint keys
     compare_mode_off = Signal()
-    compare_md_requested = Signal()
     compare_charts_selected = Signal(list)  # 0-8 checkpoint keys, live-updates
     compare_charts_mode_off = Signal()
     fold_requested = Signal()
@@ -50,6 +49,8 @@ class SidePanel(QFrame):
         self._selected_keys: list[str] = []
         self._switching_modes = False
         self.folder_store = folder_store
+        self.sort_by_folder = False
+        self._last_channels: list[dict] = []
 
         root = QVBoxLayout(self)
         root.setContentsMargins(16, 22, 16, 18)
@@ -108,25 +109,34 @@ class SidePanel(QFrame):
         # clicks into a multi-select instead of single-page navigation, so it
         # can't be an exclusive-group "current page" entry the way Config and
         # Folder Stats are.
-        self.compare_charts_btn = NavButton(None, i18n.tr("nav_compare_charts"))
+        self.compare_charts_btn = QPushButton(i18n.tr("nav_compare_charts"))
+        self.compare_charts_btn.setObjectName("ghost")
+        self.compare_charts_btn.setCheckable(True)
         self.compare_charts_btn.setToolTip(i18n.tr("nav_compare_charts_hint"))
         self.compare_charts_btn.toggled.connect(self._toggle_compare_charts_mode)
         root.addWidget(self.compare_charts_btn)
 
-        root.addSpacing(8)
-        section_row = QHBoxLayout()
+        # Own full-width row directly below Compare Charts (not squeezed
+        # into a shared row with Sort Fols) so "⭐ Compare Metrics" has
+        # room to render without clipping.
         self.compare_btn = QPushButton(i18n.tr("nav_compare"))
         self.compare_btn.setObjectName("ghost")
         self.compare_btn.setCheckable(True)
         self.compare_btn.setToolTip(i18n.tr("nav_compare_hint"))
         self.compare_btn.toggled.connect(self._toggle_compare_mode)
-        section_row.addWidget(self.compare_btn, 1)
-        self.compare_md_btn = QPushButton(i18n.tr("nav_compare_md"))
-        self.compare_md_btn.setObjectName("ghost")
-        self.compare_md_btn.setToolTip(i18n.tr("nav_compare_md_hint"))
-        self.compare_md_btn.clicked.connect(lambda: self.compare_md_requested.emit())
-        section_row.addWidget(self.compare_md_btn, 1)
-        root.addLayout(section_row)
+        root.addWidget(self.compare_btn)
+
+        root.addSpacing(8)
+        # Toggle: grouped by folder (folder list order, unassigned last),
+        # sorted by followers within each group — instead of the default
+        # flat "everyone sorted by followers" list. See
+        # FolderStore.sorted_by_folder for the actual ordering.
+        self.sort_folders_btn = QPushButton(i18n.tr("nav_sort_folders"))
+        self.sort_folders_btn.setObjectName("ghost")
+        self.sort_folders_btn.setCheckable(True)
+        self.sort_folders_btn.setToolTip(i18n.tr("nav_sort_folders_hint"))
+        self.sort_folders_btn.toggled.connect(self._on_sort_folders_toggled)
+        root.addWidget(self.sort_folders_btn)
         root.addWidget(hline())
 
         # Scrollable channel list.
@@ -149,7 +159,12 @@ class SidePanel(QFrame):
 
     # ------------------------------------------------------------ rebuild
     def set_channels(self, channels: list[dict]) -> None:
-        """channels: [{key, title, members, ...}] — sorted here by members desc."""
+        """channels: [{key, title, members, ...}] — sorted here by members
+        desc, or grouped by folder (see FolderStore.sorted_by_folder) when
+        the "Sort Fols" toggle is on. Cached in `_last_channels` so the
+        toggle can re-sort and rebuild without needing fresh data from the
+        caller — see _on_sort_folders_toggled."""
+        self._last_channels = list(channels)
         for btn in self._channel_btns.values():
             self.group.removeButton(btn)
             btn.deleteLater()
@@ -158,7 +173,10 @@ class SidePanel(QFrame):
         # Everything before the trailing stretch gets cleared except empty_lbl.
         self.empty_lbl.setVisible(not channels)
 
-        channels = sorted(channels, key=lambda c: c.get("members", 0) or 0, reverse=True)
+        if self.sort_by_folder:
+            channels = self.folder_store.sorted_by_folder(channels)
+        else:
+            channels = sorted(channels, key=lambda c: c.get("members", 0) or 0, reverse=True)
 
         # Drop folder assignments for channels that no longer exist (removed
         # from the sidebar) so folders.json doesn't accumulate dead keys.
@@ -186,6 +204,10 @@ class SidePanel(QFrame):
             self._channel_btns[key] = btn
         self.group.setExclusive(not (self.compare_mode or self.compare_charts_mode))
         self.refresh_folder_dots()
+
+    def _on_sort_folders_toggled(self, on: bool) -> None:
+        self.sort_by_folder = on
+        self.set_channels(self._last_channels)
 
     # -------------------------------------------------------------- folders
     def refresh_folder_dots(self) -> None:
@@ -332,9 +354,9 @@ class SidePanel(QFrame):
         self.empty_lbl.setText(self.i18n.tr("nav_no_channels"))
         self.compare_btn.setText(self.i18n.tr("nav_compare"))
         self.compare_btn.setToolTip(self.i18n.tr("nav_compare_hint"))
-        self.compare_md_btn.setText(self.i18n.tr("nav_compare_md"))
-        self.compare_md_btn.setToolTip(self.i18n.tr("nav_compare_md_hint"))
-        self.compare_charts_btn.set_text(self.i18n.tr("nav_compare_charts"))
+        self.sort_folders_btn.setText(self.i18n.tr("nav_sort_folders"))
+        self.sort_folders_btn.setToolTip(self.i18n.tr("nav_sort_folders_hint"))
+        self.compare_charts_btn.setText(self.i18n.tr("nav_compare_charts"))
         self.compare_charts_btn.setToolTip(self.i18n.tr("nav_compare_charts_hint"))
         self.fold_btn.setToolTip(self.i18n.tr("nav_fold_hint"))
         self.lang_btn.setText(self.i18n.lang.upper())

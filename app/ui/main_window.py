@@ -64,7 +64,6 @@ class MainWindow(QMainWindow):
         self.side.compare_charts_mode_off.connect(self._on_compare_charts_mode_off)
         self.side.fold_requested.connect(self._fold_sidebar)
         self.side.language_toggle_requested.connect(self._toggle_language)
-        self.side.compare_md_requested.connect(lambda: self.compare.save_markdown())
         self.side.folders_changed.connect(self._on_folders_changed)
         lay.addWidget(self.side)
 

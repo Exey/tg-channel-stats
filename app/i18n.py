@@ -6,12 +6,16 @@ EN = {
     # nav / sidebar
     "nav_config": "Config",
     "nav_no_channels": "No channels yet — fetch one from the Config screen.",
-    "nav_compare": "⇄ Compare",
+    "nav_compare": "⭐ Compare Metrics",
     "nav_compare_hint": "Pick 2-8 channels to compare.",
+    "nav_sort_folders": "Sort by Members",
+    "nav_sort_folders_hint": "Group the channel list by folder (folder "
+                            "order, unassigned last), sorted by followers "
+                            "within each group — instead of one flat list "
+                            "sorted by followers.",
     "nav_fold_hint": "Collapse sidebar",
     "nav_unfold_hint": "Expand sidebar",
     "nav_lang_hint": "Switch language",
-    "nav_compare_md": "MD",
     "nav_compare_md_hint": "Export the current comparison as a Markdown table",
     "compare_title": "Compare channels",
     "compare_md_metric": "Metric",
@@ -34,6 +38,14 @@ EN = {
                           "to organize channels in the sidebar.",
     "folder_list_empty": "No folders yet.",
     "folder_choose": "Assign this channel to a folder",
+    "folder_export_md_btn": "Export to MD",
+    "folder_export_md_hint": "Save every tracked channel as a Markdown "
+                             "table, grouped by folder (folder order, "
+                             "unassigned last) and sorted by followers "
+                             "within each group.",
+    "folder_export_col_folder": "Folder",
+    "folder_export_col_followers": "Followers",
+    "folder_export_col_id": "ID/Username",
     "folder_comments_refresh_label": "Refresh comments for:",
     "folder_comments_refresh_btn": "💬 Refresh comments",
     "folder_comments_refresh_hint": "Re-fetch just the comment count for "
@@ -301,12 +313,16 @@ RU = {
     "app_title": "TG Channel Stats",
     "nav_config": "Настройки",
     "nav_no_channels": "Пока нет каналов — загрузите канал на экране «Настройки».",
-    "nav_compare": "⇄ Сравнить",
+    "nav_compare": "⭐ Сравнить метрики",
     "nav_compare_hint": "Выберите 2-8 каналов для сравнения.",
+    "nav_sort_folders": "Сорт. по подпис.",
+    "nav_sort_folders_hint": "Группировать список каналов по папкам (в "
+                            "порядке папок, без папки — в конце), внутри "
+                            "каждой группы — по убыванию подписчиков, "
+                            "вместо одного общего списка по подписчикам.",
     "nav_fold_hint": "Свернуть панель",
     "nav_unfold_hint": "Развернуть панель",
     "nav_lang_hint": "Переключить язык",
-    "nav_compare_md": "MD",
     "nav_compare_md_hint": "Экспортировать текущее сравнение в таблицу Markdown",
     "compare_title": "Сравнение каналов",
     "compare_md_metric": "Метрика",
@@ -327,6 +343,15 @@ RU = {
                           "удаляйте папки для организации каналов в боковой панели.",
     "folder_list_empty": "Пока нет папок.",
     "folder_choose": "Добавить канал в папку",
+    "folder_export_md_btn": "Экспорт в MD",
+    "folder_export_md_hint": "Сохранить все отслеживаемые каналы в виде "
+                             "таблицы Markdown, сгруппированные по папкам "
+                             "(в порядке папок, без папки — в конце) и "
+                             "отсортированные по подписчикам внутри "
+                             "каждой группы.",
+    "folder_export_col_folder": "Папка",
+    "folder_export_col_followers": "Подписчики",
+    "folder_export_col_id": "ID/Юзернейм",
     "folder_comments_refresh_label": "Обновить комментарии для:",
     "folder_comments_refresh_btn": "💬 Обновить комментарии",
     "folder_comments_refresh_hint": "Заново получить только число "

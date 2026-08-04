@@ -23,6 +23,7 @@ from ..store import ChannelStore
 from ..tools.channel_stat import run_channel_stat
 from ..tools.comments_refresh import run_comments_refresh
 from ..worker import CheckLoginWorker, ToolWorker
+from .dashboard_view import fmt_int
 from .folder_dialog import FolderManagerDialog
 from .qr_login_dialog import QrLoginDialog
 from .widgets import Card, SectionCard
@@ -232,6 +233,10 @@ class ConfigView(QWidget):
         self.folders_manage_btn = QPushButton(self.tr_("folder_manage"))
         self.folders_manage_btn.clicked.connect(self._open_folder_manager)
         row.addWidget(self.folders_manage_btn)
+        self.folders_export_md_btn = QPushButton(self.tr_("folder_export_md_btn"))
+        self.folders_export_md_btn.setToolTip(self.tr_("folder_export_md_hint"))
+        self.folders_export_md_btn.clicked.connect(self._on_export_folders_md)
+        row.addWidget(self.folders_export_md_btn)
         row.addStretch()
         card.body.addLayout(row)
 
@@ -289,6 +294,45 @@ class ConfigView(QWidget):
         self.refresh_folders_list()
         self.folders_changed.emit()
 
+    # ------------------------------------------------------- folders export
+    def _build_folders_md(self) -> str:
+        """One row per tracked channel, grouped/sorted exactly like the
+        sidebar's "Sort Fols" toggle (see FolderStore.sorted_by_folder) —
+        folder list order, unassigned channels last, followers descending
+        within each group."""
+        summaries = self.folder_store.sorted_by_folder(self.channel_store.list())
+        folder_name = {f["id"]: f["name"] for f in self.folder_store.list_folders()}
+        lines = [
+            "| " + " | ".join([self.tr_("folder_export_col_folder"),
+                               self.tr_("folder_export_col_followers"),
+                               self.tr_("folder_export_col_id")]) + " |",
+            "| --- | --- | --- |",
+        ]
+        for ch in summaries:
+            fid = self.folder_store.folder_for_channel(ch["key"])
+            folder = folder_name.get(fid, self.tr_("folder_none"))
+            username = ch.get("username") or ""
+            ident = f"@{username}" if username else ch["key"]
+            lines.append(f"| {folder} | {fmt_int(ch.get('members', 0))} | {ident} |")
+        return "\n".join(lines) + "\n"
+
+    def _on_export_folders_md(self) -> None:
+        if not self.channel_store.list():
+            QMessageBox.information(self, self.tr_("app_title"), self.tr_("report_empty"))
+            return
+        path, _ = QFileDialog.getSaveFileName(
+            self, self.tr_("folder_export_md_btn"), "folders.md", "Markdown (*.md)")
+        if not path:
+            return
+        try:
+            with open(path, "w", encoding="utf-8") as f:
+                f.write(self._build_folders_md())
+        except OSError as exc:
+            QMessageBox.warning(self, self.tr_("app_title"), str(exc))
+            return
+        QMessageBox.information(self, self.tr_("app_title"),
+                                self.tr_("md_saved", path=path))
+
     # ---------------------------------------------------------- translate
     def retranslate(self) -> None:
         self.title_lbl.setText(self.tr_("nav_config"))
@@ -330,6 +374,8 @@ class ConfigView(QWidget):
         self.folders_card_ref.title_lbl.setText(self.tr_("folder_section_title"))
         self.folders_help_lbl.setText(self.tr_("folder_manage_help"))
         self.folders_manage_btn.setText(self.tr_("folder_manage"))
+        self.folders_export_md_btn.setText(self.tr_("folder_export_md_btn"))
+        self.folders_export_md_btn.setToolTip(self.tr_("folder_export_md_hint"))
         self.comments_refresh_lbl.setText(self.tr_("folder_comments_refresh_label"))
         self.refresh_comments_btn.setText(self.tr_("folder_comments_refresh_btn"))
         self.refresh_comments_btn.setToolTip(self.tr_("folder_comments_refresh_hint"))

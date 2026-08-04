@@ -85,6 +85,22 @@ class FolderStore:
     def folder_for_channel(self, key: str) -> str | None:
         return self.assignments.get(key)
 
+    def folder_sort_key(self, channel_key: str, members: int = 0) -> tuple:
+        """(folder_rank, -members) for one channel — grouped by folder in
+        `self.folders`' own order (an unassigned channel sorts after every
+        real folder), members descending within each group. Shared by the
+        sidebar's "Sort Fols" toggle and Config's folder MD export so both
+        group channels the exact same way."""
+        order = {f["id"]: i for i, f in enumerate(self.folders)}
+        rank = order.get(self.assignments.get(channel_key), len(order))
+        return (rank, -(members or 0))
+
+    def sorted_by_folder(self, channels: list[dict]) -> list[dict]:
+        """channels: [{"key", "members", ...}, ...] (e.g. ChannelStore.list()
+        summaries) — see folder_sort_key for the ordering."""
+        return sorted(channels,
+                      key=lambda ch: self.folder_sort_key(ch["key"], ch.get("members", 0)))
+
     def set_channel_folder(self, key: str, folder_id: str | None) -> None:
         if folder_id:
             self.assignments[key] = folder_id
