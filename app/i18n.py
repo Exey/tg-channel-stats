@@ -4,7 +4,7 @@ from __future__ import annotations
 EN = {
     "app_title": "TG Channel Stats",
     # nav / sidebar
-    "nav_config": "Config",
+    "nav_config": "⚙️ Config",
     "nav_no_channels": "No channels yet — fetch one from the Config screen.",
     "nav_compare": "⚖️⭐️ Metrics",
     "nav_compare_hint": "Pick 2-8 channels to compare.",
@@ -54,6 +54,15 @@ EN = {
                                     "channels — much faster than a full "
                                     "re-fetch since it skips everything "
                                     "else.",
+    "folder_assign_all_label": "Assign every channel to:",
+    "folder_assign_all_btn": "Assign all",
+    "folder_assign_all_hint": "Move every tracked channel into this folder, "
+                              "replacing any folder it's currently in.",
+    "folder_assign_all_confirm": "Move all {count} channels into "
+                                 "“{folder}”? This replaces any "
+                                 "folder they're currently assigned to.",
+    "folder_assign_all_none": "No channels to assign yet — fetch one from "
+                              "this screen first.",
     # folder stat view
     "nav_folder_stat": "📁 Folder Stats",
     "folder_stat_sub": "Cross-channel links and periodic stats for one folder",
@@ -312,7 +321,7 @@ EN = {
 
 RU = {
     "app_title": "TG Channel Stats",
-    "nav_config": "Настройки",
+    "nav_config": "⚙️ Настройки",
     "nav_no_channels": "Пока нет каналов — загрузите канал на экране «Настройки».",
     "nav_compare": "⚖️⭐️ Метрики",
     "nav_compare_hint": "Выберите 2-8 каналов для сравнения.",
@@ -361,6 +370,15 @@ RU = {
                                     "поста в каналах этой папки — намного "
                                     "быстрее полной перезагрузки, так как "
                                     "остальное не трогает.",
+    "folder_assign_all_label": "Назначить все каналы в:",
+    "folder_assign_all_btn": "Назначить все",
+    "folder_assign_all_hint": "Переместить все отслеживаемые каналы в эту "
+                              "папку, заменив текущую папку у каждого.",
+    "folder_assign_all_confirm": "Переместить все {count} каналов в "
+                                 "«{folder}»? Это заменит папку, в которой "
+                                 "они сейчас находятся.",
+    "folder_assign_all_none": "Пока нет каналов для назначения — сначала "
+                              "загрузите канал на этом экране.",
     # folder stat view
     "nav_folder_stat": "📁 Статистика папки",
     "folder_stat_sub": "Связи между каналами и статистика по периодам для одной папки",

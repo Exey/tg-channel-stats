@@ -256,6 +256,21 @@ class ConfigView(QWidget):
         comments_row.addWidget(self.refresh_comments_btn)
         card.body.addLayout(comments_row)
 
+        # Bulk move: every tracked channel into one folder at once, instead
+        # of assigning them one by one from the sidebar's right-click menu —
+        # handy right after creating a folder for a batch of channels
+        # that were all fetched before any folders existed.
+        assign_all_row = QHBoxLayout()
+        self.assign_all_lbl = QLabel(self.tr_("folder_assign_all_label"))
+        assign_all_row.addWidget(self.assign_all_lbl)
+        self.assign_all_combo = QComboBox()
+        assign_all_row.addWidget(self.assign_all_combo, 1)
+        self.assign_all_btn = QPushButton(self.tr_("folder_assign_all_btn"))
+        self.assign_all_btn.setToolTip(self.tr_("folder_assign_all_hint"))
+        self.assign_all_btn.clicked.connect(self._on_assign_all_clicked)
+        assign_all_row.addWidget(self.assign_all_btn)
+        card.body.addLayout(assign_all_row)
+
         self.refresh_folders_list()
         return card
 
@@ -273,6 +288,19 @@ class ConfigView(QWidget):
         self.comments_refresh_lbl.setVisible(has_folders)
         self.comments_folder_combo.setVisible(has_folders)
         self.refresh_comments_btn.setVisible(has_folders)
+
+        current_assign_id = self.assign_all_combo.currentData()
+        self.assign_all_combo.blockSignals(True)
+        self.assign_all_combo.clear()
+        for folder in self.folder_store.list_folders():
+            self.assign_all_combo.addItem(folder["name"], folder["id"])
+        if self.assign_all_combo.count():
+            idx = self.assign_all_combo.findData(current_assign_id)
+            self.assign_all_combo.setCurrentIndex(idx if idx >= 0 else 0)
+        self.assign_all_combo.blockSignals(False)
+        self.assign_all_lbl.setVisible(has_folders)
+        self.assign_all_combo.setVisible(has_folders)
+        self.assign_all_btn.setVisible(has_folders)
 
         folders = self.folder_store.list_folders()
         if not folders:
@@ -379,6 +407,9 @@ class ConfigView(QWidget):
         self.comments_refresh_lbl.setText(self.tr_("folder_comments_refresh_label"))
         self.refresh_comments_btn.setText(self.tr_("folder_comments_refresh_btn"))
         self.refresh_comments_btn.setToolTip(self.tr_("folder_comments_refresh_hint"))
+        self.assign_all_lbl.setText(self.tr_("folder_assign_all_label"))
+        self.assign_all_btn.setText(self.tr_("folder_assign_all_btn"))
+        self.assign_all_btn.setToolTip(self.tr_("folder_assign_all_hint"))
         self.refresh_folders_list()
 
     # ------------------------------------------------------ field helpers
@@ -599,6 +630,25 @@ class ConfigView(QWidget):
             self._append_log(self.tr_("done_fail", msg=msg))
 
     # --------------------------------------------------- refresh comments
+    def _on_assign_all_clicked(self) -> None:
+        folder_id = self.assign_all_combo.currentData()
+        if not folder_id:
+            return
+        keys = [ch["key"] for ch in self.channel_store.list()]
+        if not keys:
+            QMessageBox.information(self, self.tr_("app_title"),
+                                    self.tr_("folder_assign_all_none"))
+            return
+        folder_name = self.assign_all_combo.currentText()
+        reply = QMessageBox.question(
+            self, self.tr_("app_title"),
+            self.tr_("folder_assign_all_confirm", count=len(keys), folder=folder_name))
+        if reply != QMessageBox.StandardButton.Yes:
+            return
+        self.folder_store.assign_all(folder_id, keys)
+        self.refresh_folders_list()
+        self.folders_changed.emit()
+
     def _on_refresh_comments_clicked(self) -> None:
         folder_id = self.comments_folder_combo.currentData()
         if not folder_id:

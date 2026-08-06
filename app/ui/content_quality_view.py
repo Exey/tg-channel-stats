@@ -244,6 +244,14 @@ class ContentQualityView(QWidget):
         self.grid.setContentsMargins(0, 6, 8, 6)
         self.grid.setAlignment(Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignLeft)
         page.addWidget(self.grid_holder, 1)
+        # A trailing addStretch — not just grid_holder's own stretch=1 —
+        # because when grid_holder is hidden (no folders/no channels/no
+        # posts yet, see _reload_channels/_render_grid) Qt orphans a hidden
+        # widget's stretch instead of honoring it, and spreads the leftover
+        # height across the other, visible items instead; this
+        # always-present spacer item is what actually keeps the empty-state
+        # message pinned to the top (see the same fix in FolderStatView).
+        page.addStretch(1)
 
         self.page_scroll.setWidget(body)
 

@@ -83,21 +83,35 @@ class SidePanel(QFrame):
         self.group = QButtonGroup(self)
         self.group.setExclusive(True)
 
-        config_row = QHBoxLayout()
-        self.config_btn = NavButton("settings", i18n.tr("nav_config"))
+        # The border always lives on a plain QWidget wrapper, never on a
+        # NavButton directly — a NavButton has its own internal icon/label/
+        # meta child layout, and a "border" stylesheet property applied
+        # straight to it renders stray extra line segments past its right
+        # edge (a Qt stylesheet quirk with that inner layout), whereas the
+        # exact same border on a plain container renders as one clean pill.
+        def _bordered(*widgets: QWidget) -> QWidget:
+            holder = QWidget()
+            holder.setStyleSheet(
+                f"border: 1px solid {COLORS['line']}; border-radius: 12px;")
+            lay = QHBoxLayout(holder)
+            lay.setContentsMargins(0, 0, 0, 0)
+            lay.setSpacing(0)
+            for w in widgets:
+                lay.addWidget(w, 1 if w is widgets[0] else 0)
+            return holder
+
+        self.config_btn = NavButton(None, i18n.tr("nav_config"))
         self.config_btn.setMinimumHeight(36)
-        self.config_btn.setStyleSheet("padding: 4px 0px;")
+        self.config_btn.setStyleSheet("padding: 4px 0px; border: none;")
         self.config_btn.clicked.connect(lambda: self.config_selected.emit())
         self.group.addButton(self.config_btn)
-        config_row.addWidget(self.config_btn, 1)
         self.lang_btn = QPushButton(i18n.lang.upper())
         self.lang_btn.setObjectName("ghost")
         self.lang_btn.setMinimumWidth(36)
-        self.lang_btn.setStyleSheet("padding: 4px 12px;")
+        self.lang_btn.setStyleSheet("padding: 4px 12px; border: none;")
         self.lang_btn.setToolTip(i18n.tr("nav_lang_hint"))
         self.lang_btn.clicked.connect(lambda: self.language_toggle_requested.emit())
-        config_row.addWidget(self.lang_btn)
-        root.addLayout(config_row)
+        root.addWidget(_bordered(self.config_btn, self.lang_btn))
         root.addSpacing(4)
 
         # icon_name=None on these three: the label carries its own emoji, so
@@ -105,18 +119,18 @@ class SidePanel(QFrame):
         # #navBtn's QSS the same as every other nav entry.
         self.folder_stat_btn = NavButton(None, i18n.tr("nav_folder_stat"))
         self.folder_stat_btn.setMinimumHeight(36)
-        self.folder_stat_btn.setStyleSheet("padding: 4px 0px;")
+        self.folder_stat_btn.setStyleSheet("padding: 4px 0px; border: none;")
         self.folder_stat_btn.clicked.connect(lambda: self.folder_stat_selected.emit())
         self.group.addButton(self.folder_stat_btn)
-        root.addWidget(self.folder_stat_btn)
+        root.addWidget(_bordered(self.folder_stat_btn))
         root.addSpacing(4)
 
         self.content_quality_btn = NavButton(None, i18n.tr("nav_content_quality"))
         self.content_quality_btn.setMinimumHeight(36)
-        self.content_quality_btn.setStyleSheet("padding: 4px 0px;")
+        self.content_quality_btn.setStyleSheet("padding: 4px 0px; border: none;")
         self.content_quality_btn.clicked.connect(lambda: self.content_quality_selected.emit())
         self.group.addButton(self.content_quality_btn)
-        root.addWidget(self.content_quality_btn)
+        root.addWidget(_bordered(self.content_quality_btn))
         root.addSpacing(4)
 
         # Compare Charts + Compare Metrics share one row — neither is part of

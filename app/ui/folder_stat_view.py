@@ -143,6 +143,13 @@ class FolderStatView(QWidget):
         body.setContentsMargins(0, 6, 0, 0)
         body.setSpacing(20)
         outer.addWidget(self.content, 1)
+        # A trailing addStretch — not just content's own stretch=1 — because
+        # when content is hidden (no folders/no channels yet, see
+        # _reload_channels) Qt orphans a hidden widget's stretch instead of
+        # honoring it, and spreads the leftover height across the other,
+        # visible items instead; this always-present spacer item is what
+        # actually keeps the empty-state message pinned to the top.
+        outer.addStretch(1)
 
         body.addWidget(self._links_card())
         body.addWidget(self._period_card(), 1)

@@ -107,3 +107,11 @@ class FolderStore:
         else:
             self.assignments.pop(key, None)
         self.save()
+
+    def assign_all(self, folder_id: str, keys: list[str]) -> None:
+        """Bulk-assign every given channel to one folder in a single save,
+        instead of N individual set_channel_folder() writes — used by
+        Config's "assign every channel to a folder" action."""
+        for key in keys:
+            self.assignments[key] = folder_id
+        self.save()
