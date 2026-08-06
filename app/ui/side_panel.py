@@ -10,7 +10,7 @@ from __future__ import annotations
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
     QButtonGroup, QFrame, QHBoxLayout, QLabel, QMenu, QPushButton,
-    QScrollArea, QVBoxLayout, QWidget,
+    QScrollArea, QStackedLayout, QVBoxLayout, QWidget,
 )
 
 from ..folders import FolderStore
@@ -52,9 +52,18 @@ class SidePanel(QFrame):
         self.sort_by_folder = False
         self._last_channels: list[dict] = []
 
-        root = QVBoxLayout(self)
+        # Root is a StackAll QStackedLayout — same overlay technique as
+        # CompareView's "Save MD" button — so the version tag can float in
+        # the top-left corner (over the blank strip above the brand row)
+        # without spending a row of its own in the real layout, leaving that
+        # height for the channel list below.
+        outer_stack = QStackedLayout(self)
+        outer_stack.setStackingMode(QStackedLayout.StackingMode.StackAll)
+
+        content = QWidget()
+        root = QVBoxLayout(content)
         root.setContentsMargins(16, 22, 16, 18)
-        root.setSpacing(10)
+        root.setSpacing(0)
 
         brand_row = QHBoxLayout()
         brand = QLabel()
@@ -69,11 +78,6 @@ class SidePanel(QFrame):
         self.fold_btn.clicked.connect(lambda: self.fold_requested.emit())
         brand_row.addWidget(self.fold_btn)
         root.addLayout(brand_row)
-
-        version_lbl = QLabel(f"v{__version__}")
-        version_lbl.setStyleSheet(f"color: {COLORS['faint']}; font-size: 11px;")
-        root.addWidget(version_lbl)
-
         root.addSpacing(10)
 
         self.group = QButtonGroup(self)
@@ -81,52 +85,67 @@ class SidePanel(QFrame):
 
         config_row = QHBoxLayout()
         self.config_btn = NavButton("settings", i18n.tr("nav_config"))
+        self.config_btn.setMinimumHeight(36)
+        self.config_btn.setStyleSheet("padding: 4px 0px;")
         self.config_btn.clicked.connect(lambda: self.config_selected.emit())
         self.group.addButton(self.config_btn)
         config_row.addWidget(self.config_btn, 1)
         self.lang_btn = QPushButton(i18n.lang.upper())
         self.lang_btn.setObjectName("ghost")
         self.lang_btn.setMinimumWidth(36)
+        self.lang_btn.setStyleSheet("padding: 4px 12px;")
         self.lang_btn.setToolTip(i18n.tr("nav_lang_hint"))
         self.lang_btn.clicked.connect(lambda: self.language_toggle_requested.emit())
         config_row.addWidget(self.lang_btn)
         root.addLayout(config_row)
+        root.addSpacing(4)
 
         # icon_name=None on these three: the label carries its own emoji, so
         # a second SVG icon column would be redundant — left-aligned via
         # #navBtn's QSS the same as every other nav entry.
         self.folder_stat_btn = NavButton(None, i18n.tr("nav_folder_stat"))
+        self.folder_stat_btn.setMinimumHeight(36)
+        self.folder_stat_btn.setStyleSheet("padding: 4px 0px;")
         self.folder_stat_btn.clicked.connect(lambda: self.folder_stat_selected.emit())
         self.group.addButton(self.folder_stat_btn)
         root.addWidget(self.folder_stat_btn)
+        root.addSpacing(4)
 
         self.content_quality_btn = NavButton(None, i18n.tr("nav_content_quality"))
+        self.content_quality_btn.setMinimumHeight(36)
+        self.content_quality_btn.setStyleSheet("padding: 4px 0px;")
         self.content_quality_btn.clicked.connect(lambda: self.content_quality_selected.emit())
         self.group.addButton(self.content_quality_btn)
         root.addWidget(self.content_quality_btn)
+        root.addSpacing(4)
 
-        # Not part of `self.group`: like Compare below, it repurposes channel
-        # clicks into a multi-select instead of single-page navigation, so it
-        # can't be an exclusive-group "current page" entry the way Config and
-        # Folder Stats are.
+        # Compare Charts + Compare Metrics share one row — neither is part of
+        # `self.group`: like Compare below, they repurpose channel clicks
+        # into a multi-select instead of single-page navigation, so they
+        # can't be an exclusive-group "current page" entry the way Config
+        # and Folder Stats are. Short "⚖️" labels (rather than the old
+        # "📈 Compare Charts" / "⭐ Compare Metrics") are what makes fitting
+        # both side by side possible without clipping.
+        compare_row = QHBoxLayout()
+        compare_row.setSpacing(6)
         self.compare_charts_btn = QPushButton(i18n.tr("nav_compare_charts"))
         self.compare_charts_btn.setObjectName("ghost")
         self.compare_charts_btn.setCheckable(True)
+        self.compare_charts_btn.setStyleSheet("padding: 4px 8px;")
         self.compare_charts_btn.setToolTip(i18n.tr("nav_compare_charts_hint"))
         self.compare_charts_btn.toggled.connect(self._toggle_compare_charts_mode)
-        root.addWidget(self.compare_charts_btn)
+        compare_row.addWidget(self.compare_charts_btn, 1)
 
-        # Own full-width row directly below Compare Charts (not squeezed
-        # into a shared row with Sort Fols) so "⭐ Compare Metrics" has
-        # room to render without clipping.
         self.compare_btn = QPushButton(i18n.tr("nav_compare"))
         self.compare_btn.setObjectName("ghost")
         self.compare_btn.setCheckable(True)
+        self.compare_btn.setStyleSheet("padding: 4px 8px;")
         self.compare_btn.setToolTip(i18n.tr("nav_compare_hint"))
         self.compare_btn.toggled.connect(self._toggle_compare_mode)
-        root.addWidget(self.compare_btn)
+        compare_row.addWidget(self.compare_btn, 1)
+        root.addLayout(compare_row)
+        root.addSpacing(6)
 
-        root.addSpacing(8)
         # Toggle: grouped by folder (folder list order, unassigned last),
         # sorted by followers within each group — instead of the default
         # flat "everyone sorted by followers" list. See
@@ -134,12 +153,15 @@ class SidePanel(QFrame):
         self.sort_folders_btn = QPushButton(i18n.tr("nav_sort_folders"))
         self.sort_folders_btn.setObjectName("ghost")
         self.sort_folders_btn.setCheckable(True)
+        self.sort_folders_btn.setStyleSheet("padding: 4px 12px;")
         self.sort_folders_btn.setToolTip(i18n.tr("nav_sort_folders_hint"))
         self.sort_folders_btn.toggled.connect(self._on_sort_folders_toggled)
         root.addWidget(self.sort_folders_btn)
+        root.addSpacing(6)
         root.addWidget(hline())
 
-        # Scrollable channel list.
+        # Scrollable channel list — no spacing after the divider above: it
+        # should sit flush against the list rather than leaving a gap.
         self.scroll = QScrollArea()
         self.scroll.setWidgetResizable(True)
         self.scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
@@ -156,6 +178,22 @@ class SidePanel(QFrame):
         root.addWidget(self.scroll, 1)
 
         self._channel_btns: dict[str, NavButton] = {}
+
+        outer_stack.addWidget(content)
+
+        # Overlay layer for the version tag — WA_TransparentForMouseEvents on
+        # the *container* (not the label) so clicks/scrolling on the real
+        # content underneath keep working everywhere outside its own small
+        # rect (same technique as CompareView's "Save MD" overlay).
+        overlay = QWidget()
+        overlay.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
+        overlay_lay = QVBoxLayout(overlay)
+        overlay_lay.setContentsMargins(16, 4, 0, 0)
+        overlay_lay.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop)
+        version_lbl = QLabel(f"v{__version__}")
+        version_lbl.setStyleSheet(f"color: {COLORS['faint']}; font-size: 10px;")
+        overlay_lay.addWidget(version_lbl)
+        outer_stack.addWidget(overlay)
 
     # ------------------------------------------------------------ rebuild
     def set_channels(self, channels: list[dict]) -> None:

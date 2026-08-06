@@ -6,7 +6,7 @@ EN = {
     # nav / sidebar
     "nav_config": "Config",
     "nav_no_channels": "No channels yet — fetch one from the Config screen.",
-    "nav_compare": "⭐ Compare Metrics",
+    "nav_compare": "⚖️⭐️ Metrics",
     "nav_compare_hint": "Pick 2-8 channels to compare.",
     "nav_sort_folders": "Sort by Members",
     "nav_sort_folders_active": "Sort by Folders",
@@ -136,7 +136,7 @@ EN = {
                                "voice/audio or other file) from the grid, "
                                "the per-channel limit and the Tg Links list.",
     # compare charts view
-    "nav_compare_charts": "📈 Compare Charts",
+    "nav_compare_charts": "⚖️📈 Charts",
     "nav_compare_charts_hint": "Pick up to 8 channels to compare on charts.",
     "compare_charts_sub": "Views, shares and reactions over time for the "
                           "channels selected in the sidebar",
@@ -314,7 +314,7 @@ RU = {
     "app_title": "TG Channel Stats",
     "nav_config": "Настройки",
     "nav_no_channels": "Пока нет каналов — загрузите канал на экране «Настройки».",
-    "nav_compare": "⭐ Сравнить метрики",
+    "nav_compare": "⚖️⭐️ Метрики",
     "nav_compare_hint": "Выберите 2-8 каналов для сравнения.",
     "nav_sort_folders": "Сорт. по подпис.",
     "nav_sort_folders_active": "Сорт. по папкам",
@@ -445,7 +445,7 @@ RU = {
                                "голосового/аудио или другого файла) из "
                                "сетки, лимита по каналу и списка ссылок.",
     # compare charts view
-    "nav_compare_charts": "📈 Сравнить на графиках",
+    "nav_compare_charts": "⚖️📈 Графики",
     "nav_compare_charts_hint": "Выберите до 8 каналов для сравнения на графиках.",
     "compare_charts_sub": "Просмотры, репосты и реакции по времени для "
                           "каналов, выбранных в боковой панели",

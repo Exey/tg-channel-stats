@@ -79,7 +79,7 @@ class CompareView(QWidget):
     def _build_ui(self) -> None:
         # Root is a StackAll QStackedLayout — same overlay technique as the
         # per-column crown emoji below — so the "Save MD" button can float
-        # over the top-left corner without becoming part of (or disturbing)
+        # over the top-right corner without becoming part of (or disturbing)
         # the real content layout at all.
         root_stack = QStackedLayout(self)
         root_stack.setStackingMode(QStackedLayout.StackingMode.StackAll)
@@ -169,8 +169,8 @@ class CompareView(QWidget):
         overlay = QWidget()
         overlay.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
         overlay_lay = QVBoxLayout(overlay)
-        overlay_lay.setContentsMargins(20, 12, 0, 0)
-        overlay_lay.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop)
+        overlay_lay.setContentsMargins(0, 12, 20, 0)
+        overlay_lay.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignTop)
         self.md_btn = QPushButton(self.tr_("save_md_button"))
         self.md_btn.setToolTip(self.tr_("nav_compare_md_hint"))
         self.md_btn.clicked.connect(self.save_markdown)
