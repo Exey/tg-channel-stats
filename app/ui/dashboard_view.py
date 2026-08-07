@@ -494,12 +494,13 @@ class DashboardView(QWidget):
         legend_row = QHBoxLayout()
         legend_row.setSpacing(10)
         self._trend_series_visible = {"views": True, "reactions": False, "shares": False,
-                                      "quality": False}
+                                      "quality": False, "posts": False}
         self._trend_series_btns: dict[str, QPushButton] = {}
         for key, title_key, color_key in (("views", "col_views", "accent"),
                                           ("reactions", "col_reactions", "weekday"),
                                           ("shares", "col_shares", "warn"),
-                                          ("quality", "chart_quality", "good")):
+                                          ("quality", "chart_quality", "good"),
+                                          ("posts", "chart_posts", "posts")):
             btn = QPushButton(f"● {self.tr_(title_key)}")
             btn.setObjectName("ghost")
             btn.setCheckable(True)
@@ -768,12 +769,14 @@ class DashboardView(QWidget):
     def _rebuild_trend_chart(self) -> None:
         monthly = self._data.get("distributions", {}).get("monthly") or []
         if self._trend_mode == "season":
-            labels, views, reactions, shares, period_keys = self._trend_season_series(monthly)
+            labels, views, reactions, shares, posts, period_keys = (
+                self._trend_season_series(monthly))
         else:
             labels = [self._month_label_full(m.get("label", "")) for m in monthly]
             views = [int(m.get("views", 0) or 0) for m in monthly]
             reactions = [int(m.get("reactions", 0) or 0) for m in monthly]
             shares = [int(m.get("shares", 0) or 0) for m in monthly]
+            posts = [int(m.get("count", 0) or 0) for m in monthly]
             period_keys = []
             for m in monthly:
                 try:
@@ -784,8 +787,9 @@ class DashboardView(QWidget):
                 period_keys.append((y, mo))
         quality = self._quality_series(period_keys)
         if self.trend_trim_edges_chk.isChecked() and len(labels) > 2:
-            labels, views, reactions, shares, quality = (
-                labels[1:-1], views[1:-1], reactions[1:-1], shares[1:-1], quality[1:-1])
+            labels, views, reactions, shares, posts, quality = (
+                labels[1:-1], views[1:-1], reactions[1:-1], shares[1:-1],
+                posts[1:-1], quality[1:-1])
         all_series = {
             "views": {"label": self.tr_("col_views"), "color": COLORS["accent"], "values": views},
             "reactions": {"label": self.tr_("col_reactions"), "color": COLORS["weekday"],
@@ -793,6 +797,8 @@ class DashboardView(QWidget):
             "shares": {"label": self.tr_("col_shares"), "color": COLORS["warn"], "values": shares},
             "quality": {"label": self.tr_("chart_quality"), "color": COLORS["good"],
                        "values": quality},
+            "posts": {"label": self.tr_("chart_posts"), "color": COLORS["posts"],
+                     "values": posts},
         }
         series = [s for key, s in all_series.items() if self._trend_series_visible.get(key)]
         self.trend_chart.set_data(series, labels, empty_text=self.tr_("chart_empty"))
@@ -823,7 +829,7 @@ class DashboardView(QWidget):
 
     @staticmethod
     def _trend_season_series(monthly: list[dict]) -> tuple[list[str], list[int], list[int],
-                                                             list[int], list[tuple]]:
+                                                             list[int], list[int], list[tuple]]:
         """Sum each season's 3 months together — same season grouping the
         Folder Stats view uses (see app.periods)."""
         buckets: dict[tuple, dict] = {}
@@ -833,13 +839,16 @@ class DashboardView(QWidget):
             except ValueError:
                 continue
             key, label = period_key_label(year, month, "season")
-            b = buckets.setdefault(key, {"label": label, "views": 0, "reactions": 0, "shares": 0})
+            b = buckets.setdefault(key, {"label": label, "views": 0, "reactions": 0,
+                                         "shares": 0, "count": 0})
             b["views"] += int(m.get("views", 0) or 0)
             b["reactions"] += int(m.get("reactions", 0) or 0)
             b["shares"] += int(m.get("shares", 0) or 0)
+            b["count"] += int(m.get("count", 0) or 0)
         keys = sorted(buckets)
         return ([buckets[k]["label"] for k in keys], [buckets[k]["views"] for k in keys],
-               [buckets[k]["reactions"] for k in keys], [buckets[k]["shares"] for k in keys], keys)
+               [buckets[k]["reactions"] for k in keys], [buckets[k]["shares"] for k in keys],
+               [buckets[k]["count"] for k in keys], keys)
 
     @staticmethod
     def _month_label_full(iso_month: str) -> str:
@@ -1129,7 +1138,8 @@ class DashboardView(QWidget):
         self.trend_mode_season_btn.setText(self.tr_("period_mode_season"))
         self.trend_mode_month_btn.setText(self.tr_("period_mode_month"))
         for key, title_key in (("views", "col_views"), ("reactions", "col_reactions"),
-                               ("shares", "col_shares"), ("quality", "chart_quality")):
+                               ("shares", "col_shares"), ("quality", "chart_quality"),
+                               ("posts", "chart_posts")):
             self._trend_series_btns[key].setText(f"● {self.tr_(title_key)}")
         self.recent_posts_card.title_lbl.setText(self.tr_("dash_recent_posts_title"))
         if self._media_worker is None:

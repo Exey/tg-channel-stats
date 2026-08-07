@@ -24,7 +24,7 @@ from datetime import datetime
 from PySide6.QtCore import Qt, QUrl
 from PySide6.QtGui import QDesktopServices
 from PySide6.QtWidgets import (
-    QAbstractItemView, QButtonGroup, QComboBox, QFileDialog, QHBoxLayout,
+    QAbstractItemView, QButtonGroup, QComboBox, QFileDialog, QFrame, QHBoxLayout,
     QHeaderView, QLabel, QMessageBox, QPushButton, QScrollArea, QSizePolicy,
     QTableWidget, QTableWidgetItem, QVBoxLayout, QWidget,
 )
@@ -99,8 +99,25 @@ class FolderStatView(QWidget):
     # --------------------------------------------------------------- build
     def _build_ui(self) -> None:
         outer = QVBoxLayout(self)
-        outer.setContentsMargins(34, 28, 40, 24)
-        outer.setSpacing(16)
+        outer.setContentsMargins(0, 0, 0, 0)
+        outer.setSpacing(0)
+
+        # The whole page scrolls as one unit — the period table used to be
+        # the one thing that scrolled internally (fixed to whatever space
+        # was left after the header/pickers), which meant a big folder/
+        # period got squeezed into a tiny visible slice. Now the table
+        # grows to its full row count (see _sync_period_table_height) and
+        # this scroll area is what pans to the rest of it.
+        self.page_scroll = QScrollArea()
+        self.page_scroll.setWidgetResizable(True)
+        self.page_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.page_scroll.setFrameShape(QFrame.Shape.NoFrame)
+        outer.addWidget(self.page_scroll)
+
+        page_holder = QWidget()
+        page = QVBoxLayout(page_holder)
+        page.setContentsMargins(34, 28, 40, 24)
+        page.setSpacing(16)
 
         header = QVBoxLayout()
         header.setSpacing(2)
@@ -110,7 +127,7 @@ class FolderStatView(QWidget):
         self.sub_lbl = QLabel(self.tr_("folder_stat_sub"))
         self.sub_lbl.setObjectName("pageSub")
         header.addWidget(self.sub_lbl)
-        outer.addLayout(header)
+        page.addLayout(header)
 
         pick_row = QHBoxLayout()
         self.pick_lbl = QLabel(self.tr_("folder_stat_pick_folder"))
@@ -118,26 +135,19 @@ class FolderStatView(QWidget):
         self.folder_combo = QComboBox()
         self.folder_combo.currentIndexChanged.connect(self._on_folder_changed)
         pick_row.addWidget(self.folder_combo, 1)
-        outer.addLayout(pick_row)
-        outer.addWidget(hline())
+        page.addLayout(pick_row)
+        page.addWidget(hline())
 
         self.no_folders_lbl = QLabel(self.tr_("folder_stat_no_folders"))
         self.no_folders_lbl.setObjectName("navEmpty")
         self.no_folders_lbl.setWordWrap(True)
-        outer.addWidget(self.no_folders_lbl)
+        page.addWidget(self.no_folders_lbl)
 
         self.empty_channels_lbl = QLabel(self.tr_("folder_stat_empty_channels"))
         self.empty_channels_lbl.setObjectName("navEmpty")
         self.empty_channels_lbl.setWordWrap(True)
-        outer.addWidget(self.empty_channels_lbl)
+        page.addWidget(self.empty_channels_lbl)
 
-        # No outer QScrollArea: it would size `content` to its natural
-        # (unbounded) sizeHint and scroll the whole page, starving the
-        # period table of vertical space. Adding `content` straight to
-        # `outer` with stretch=1 instead makes it — and the period card's
-        # own stretch=1 inside it — actually fill the window; the links
-        # table stays capped (see _links_card) and the period table scrolls
-        # internally like any QTableWidget.
         self.content = QWidget()
         body = QVBoxLayout(self.content)
         body.setContentsMargins(0, 6, 0, 0)
@@ -145,21 +155,24 @@ class FolderStatView(QWidget):
         # content's stretch is wildly disproportionate (100 vs. the trailing
         # spacer's 1) on purpose: with two equal-stretch=1 items, Qt splits
         # leftover space between them roughly evenly, which used to leave
-        # the period table stopping well short of the window's bottom edge.
+        # the cards stopping well short of the window's bottom edge when
+        # there's little enough data that the page doesn't need to scroll.
         # The 100:1 ratio makes content claim essentially all of it while
         # keeping the spacer's stretch nonzero — needed for the *hidden*
         # case below.
-        outer.addWidget(self.content, 100)
+        page.addWidget(self.content, 100)
         # A trailing addStretch — not just content's own stretch — because
         # when content is hidden (no folders/no channels yet, see
         # _reload_channels) Qt orphans a hidden widget's stretch instead of
         # honoring it, and spreads the leftover height across the other,
         # visible items instead; this always-present spacer item is what
         # actually keeps the empty-state message pinned to the top.
-        outer.addStretch(1)
+        page.addStretch(1)
 
         body.addWidget(self._links_card())
         body.addWidget(self._period_card(), 1)
+
+        self.page_scroll.setWidget(page_holder)
 
     def _links_card(self) -> SectionCard:
         card = SectionCard(self.tr_("folder_stat_links_title"))
@@ -240,6 +253,11 @@ class FolderStatView(QWidget):
         period_header.sectionClicked.connect(self._on_period_header_clicked)
         self.period_table.cellDoubleClicked.connect(self._open_period_post)
         self.period_table.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+        # No internal scrollbar: the table grows to fit every row (see
+        # _sync_period_table_height) and the page-level scroll area handles
+        # anything taller than the viewport, instead of the table scrolling
+        # on its own within a fixed slice of the page.
+        self.period_table.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
 
         # Every widget the toggle handler touches now exists, so it's safe to
         # wire the signal and set the default mode (which fires it once).
@@ -720,6 +738,19 @@ class FolderStatView(QWidget):
                  else Qt.SortOrder.AscendingOrder)
         self.period_table.horizontalHeader().setSortIndicatorShown(True)
         self.period_table.horizontalHeader().setSortIndicator(self._period_sort_col, order)
+        self._sync_period_table_height()
+
+    def _sync_period_table_height(self) -> None:
+        """Grow period_table to fit every row with no internal scrollbar
+        (see its setVerticalScrollBarPolicy in _period_card) — height still
+        only a *minimum*, so QSizePolicy.Expanding can inflate it further
+        to fill the page when there's little enough data that the page
+        doesn't need to scroll (see _build_ui's 100:1 stretch)."""
+        total = self.period_table.horizontalHeader().height()
+        for r in range(self.period_table.rowCount()):
+            total += self.period_table.rowHeight(r)
+        total += 2 * self.period_table.frameWidth()
+        self.period_table.setMinimumHeight(total)
 
     def _open_period_post(self, row: int, _col: int) -> None:
         item = self.period_table.item(row, 5)

@@ -1,17 +1,17 @@
 """Multi-channel trend comparison: one line per selected channel (2-8, chosen
 via the sidebar's Compare Charts mode — see SidePanel.compare_charts_selected)
-on each of four stacked charts, in this order: Quality, Views, Shares,
-Reactions. Shares a month/season toggle across all four, and the same
+on each of five stacked charts, in this order: Quality, Views, Shares,
+Reactions, Posts. Shares a month/season toggle across all five, and the same
 MultiLineChart widget the single-channel dashboard trend chart uses.
 
-Quality is computed differently from the other three: Views/Shares/Reactions
-are simple per-period sums straight out of each channel's
+Quality is computed differently from the other four: Views/Shares/Reactions/
+Posts are simple per-period sums straight out of each channel's
 `distributions.monthly` (every scanned post, see channel_stat.py's module
-docstring), but a post's quality score (app.scoring) needs per-post
-reactions/forwards/comments/views, which only the stored top-N pool
-(`rows`) carries — so Quality is a per-period *average* over whatever pool
-posts fall in each period, same approach as the single-channel dashboard's
-own Quality trend line.
+docstring — Posts sums each bucket's `count`), but a post's quality score
+(app.scoring) needs per-post reactions/forwards/comments/views, which only
+the stored top-N pool (`rows`) carries — so Quality is a per-period
+*average* over whatever pool posts fall in each period, same approach as
+the single-channel dashboard's own Quality trend line.
 """
 from __future__ import annotations
 
@@ -48,9 +48,10 @@ _SERIES_COLORS = [
 
 # (metric key, i18n key for its chart title) — order here is display order
 # top-to-bottom. "quality" is handled separately in _rebuild_charts (see
-# module docstring) — the other three are plain monthly-aggregate sums.
+# module docstring) — the other four are plain monthly-aggregate sums.
 _METRICS = [("quality", "chart_quality"), ("views", "col_views"),
-            ("shares", "col_shares"), ("reactions", "col_reactions")]
+            ("shares", "col_shares"), ("reactions", "col_reactions"),
+            ("posts", "chart_posts")]
 
 
 def _pretty_label(key_label: str, mode: str) -> str:
@@ -215,10 +216,11 @@ class CompareChartsView(QWidget):
                 except ValueError:
                     continue
                 key, label = period_key_label(year, month, self._mode)
-                b = buckets.setdefault(key, {"views": 0, "shares": 0, "reactions": 0})
+                b = buckets.setdefault(key, {"views": 0, "shares": 0, "reactions": 0, "posts": 0})
                 b["views"] += int(m.get("views", 0) or 0)
                 b["shares"] += int(m.get("shares", 0) or 0)
                 b["reactions"] += int(m.get("reactions", 0) or 0)
+                b["posts"] += int(m.get("count", 0) or 0)
                 all_keys[key] = label
             per_channel.append(buckets)
 

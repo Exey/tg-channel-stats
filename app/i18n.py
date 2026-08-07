@@ -285,8 +285,9 @@ EN = {
     "cmp_viral_share_tip": "The percentage of posts that received more than "
                            "2× the average number of views.",
     # charts
-    "chart_trend_title": "Views / Reactions / Shares over time",
+    "chart_trend_title": "Views / Reactions / Shares / Posts over time",
     "chart_quality": "Quality",
+    "chart_posts": "Posts",
     "chart_trim_edges": "Hide first/last month",
     "chart_by_hour": "Posts by hour of day",
     "chart_by_weekday": "Posts by day of week",
@@ -604,8 +605,9 @@ RU = {
     "cmp_viral_share": "Доля вирусных постов",
     "cmp_viral_share_tip": "Процент постов, набравших более чем в 2 раза "
                            "больше среднего числа просмотров.",
-    "chart_trend_title": "Просмотры / Реакции / Репосты по времени",
+    "chart_trend_title": "Просмотры / Реакции / Репосты / Посты по времени",
     "chart_quality": "Качество",
+    "chart_posts": "Посты",
     "chart_trim_edges": "Скрыть первый/последний месяц",
     "chart_by_hour": "Посты по часам суток",
     "dash_recent_posts_title": "Последние 50 постов",
