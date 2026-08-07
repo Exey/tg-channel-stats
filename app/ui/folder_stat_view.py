@@ -142,8 +142,15 @@ class FolderStatView(QWidget):
         body = QVBoxLayout(self.content)
         body.setContentsMargins(0, 6, 0, 0)
         body.setSpacing(20)
-        outer.addWidget(self.content, 1)
-        # A trailing addStretch — not just content's own stretch=1 — because
+        # content's stretch is wildly disproportionate (100 vs. the trailing
+        # spacer's 1) on purpose: with two equal-stretch=1 items, Qt splits
+        # leftover space between them roughly evenly, which used to leave
+        # the period table stopping well short of the window's bottom edge.
+        # The 100:1 ratio makes content claim essentially all of it while
+        # keeping the spacer's stretch nonzero — needed for the *hidden*
+        # case below.
+        outer.addWidget(self.content, 100)
+        # A trailing addStretch — not just content's own stretch — because
         # when content is hidden (no folders/no channels yet, see
         # _reload_channels) Qt orphans a hidden widget's stretch instead of
         # honoring it, and spreads the leftover height across the other,

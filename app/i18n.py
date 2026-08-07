@@ -135,7 +135,11 @@ EN = {
     "cqi_tg_links_hint": "Generate a copyable text list of links to the "
                          "posts shown below, ranked by score.",
     "cqi_tg_links_dialog_title": "Tg Links",
-    "cqi_tg_links_header": "{folder} High-Quality posts for {period}",
+    "cqi_tg_links_header": "{folder} / {period}",
+    "cqi_tg_links_top_authors_title": "Best {n} authors",
+    "cqi_max_posts_n": "Top {n}",
+    "cqi_max_posts_hint": "How many top posts to show overall — in the grid, "
+                         "the per-channel limit and the Tg Links list.",
     "cqi_tg_links_limit_hint": "Limit how many posts from the same channel "
                                "are shown below and in the Tg Links list.",
     "cqi_tg_links_limit_none": "No limit",
@@ -144,6 +148,12 @@ EN = {
     "cqi_hide_non_media_hint": "Hide text-only posts (no photo, video, "
                                "voice/audio or other file) from the grid, "
                                "the per-channel limit and the Tg Links list.",
+    "cqi_min_followers_none": "Any followers",
+    "cqi_min_followers_n": "≥{n} followers",
+    "cqi_min_followers_hint": "Only rank posts from channels with at least "
+                              "this many followers — a tiny, highly-engaged "
+                              "channel can otherwise crowd out posts from "
+                              "bigger channels worth featuring.",
     # compare charts view
     "nav_compare_charts": "⚖️📈 Charts",
     "nav_compare_charts_hint": "Pick up to 8 channels to compare on charts.",
@@ -454,6 +464,10 @@ RU = {
                          "на посты ниже, по убыванию оценки.",
     "cqi_tg_links_dialog_title": "Ссылки",
     "cqi_tg_links_header": "{folder} — лучшие посты за {period}",
+    "cqi_tg_links_top_authors_title": "Лучшие {n} авторов",
+    "cqi_max_posts_n": "Топ {n}",
+    "cqi_max_posts_hint": "Сколько постов показывать всего — в сетке, "
+                         "лимите по каналу и списке ссылок.",
     "cqi_tg_links_limit_hint": "Ограничить число постов одного канала ниже "
                                "и в списке ссылок.",
     "cqi_tg_links_limit_none": "Без ограничения",
@@ -462,6 +476,12 @@ RU = {
     "cqi_hide_non_media_hint": "Скрыть текстовые посты (без фото, видео, "
                                "голосового/аудио или другого файла) из "
                                "сетки, лимита по каналу и списка ссылок.",
+    "cqi_min_followers_none": "Любые подписчики",
+    "cqi_min_followers_n": "≥{n} подписчиков",
+    "cqi_min_followers_hint": "Учитывать в рейтинге только посты каналов "
+                              "минимум с таким числом подписчиков — иначе "
+                              "маленький, но активный канал может "
+                              "вытеснить посты более крупных каналов.",
     # compare charts view
     "nav_compare_charts": "⚖️📈 Графики",
     "nav_compare_charts_hint": "Выберите до 8 каналов для сравнения на графиках.",

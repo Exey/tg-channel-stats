@@ -58,13 +58,15 @@ from .widgets import (
     PostCard, POST_CARD_HEIGHT as CARD_HEIGHT, POST_CARD_PLACEHOLDERS as _MEDIA_PLACEHOLDERS,
     POST_CARD_TEXT_LINES as _TEXT_LINES, POST_CARD_TEXT_PIXEL_SIZE as _TEXT_PIXEL_SIZE,
     POST_CARD_TEXT_WIDTH as _TEXT_WIDTH, POST_CARD_THUMB_HEIGHT as _THUMB_HEIGHT,
-    POST_CARD_WIDTH as CARD_WIDTH, elide_to_lines as _elide_to_lines, hline,
+    POST_CARD_WIDTH as CARD_WIDTH, elide_to_lines as _elide_to_lines,
 )
 
 _GRID_SPACING = 14
 _PAGE_MARGIN_LEFT = 34
 _PAGE_MARGIN_RIGHT = 40
-MAX_POSTS_SHOWN = 50   # keeps a big folder/period from being an unbounded grid
+MAX_POSTS_SHOWN = 80   # keeps a big folder/period from being an unbounded grid
+TOP_AUTHORS_SHOWN = 5   # "Best N authors" summary at the top of the Tg Links export
+_TG_LINKS_SNIPPET_LEN = 12
 MONTHS_FULL = ["", "January", "February", "March", "April", "May", "June",
                "July", "August", "September", "October", "November", "December"]
 
@@ -99,6 +101,10 @@ def _channel_avg_views(ch: dict) -> float:
     by channel_stat.py over its whole scanned history) — 0 for a checkpoint
     that predates that field or never settled a value."""
     return float(ch.get("stats", {}).get("avg_views", 0) or 0)
+
+
+def _channel_members(ch: dict) -> int:
+    return int(ch.get("info", {}).get("members", 0) or 0)
 
 
 class ContentQualityView(QWidget):
@@ -143,7 +149,11 @@ class ContentQualityView(QWidget):
 
         page = QVBoxLayout(body)
         page.setContentsMargins(_PAGE_MARGIN_LEFT, 28, _PAGE_MARGIN_RIGHT, 24)
-        page.setSpacing(16)
+        # Explicit per-pair spacing below (not a single page.setSpacing())
+        # so the picker-to-grid gap can be tighter than the rest, now that
+        # there's no divider line sitting between them to justify the same
+        # 16px used elsewhere on the page.
+        page.setSpacing(0)
 
         header = QHBoxLayout()
         self.title_lbl = QLabel(self.tr_("nav_content_quality"))
@@ -166,10 +176,19 @@ class ContentQualityView(QWidget):
         self.tg_links_btn.setToolTip(self.tr_("cqi_tg_links_hint"))
         self.tg_links_btn.clicked.connect(self._on_tg_links_clicked)
         header.addWidget(self.tg_links_btn)
+        # How many top posts to keep overall — the same cap the grid, the
+        # per-channel limit and the Tg Links list all share (see
+        # _channel_limited_entries).
+        self.max_posts_combo = QComboBox()
+        self.max_posts_combo.setToolTip(self.tr_("cqi_max_posts_hint"))
+        for n in (25, 40, 50, 60, 70, 80):
+            self.max_posts_combo.addItem(self.tr_("cqi_max_posts_n", n=n), n)
+        self.max_posts_combo.setCurrentIndex(self.max_posts_combo.findData(MAX_POSTS_SHOWN))
+        header.addWidget(self.max_posts_combo)
         # Caps how many posts from the same channel can appear — both in
         # the grid below and in the generated Tg Links list, so one
         # prolific channel can't fill up either one. Connected to
-        # _on_channel_limit_changed further down, once the grid it needs
+        # _on_filter_changed further down, once the grid it needs
         # to rebuild actually exists.
         self.tg_links_limit_combo = QComboBox()
         self.tg_links_limit_combo.setToolTip(self.tr_("cqi_tg_links_limit_hint"))
@@ -177,6 +196,16 @@ class ContentQualityView(QWidget):
         for n in (7, 6, 5, 4, 3, 2):
             self.tg_links_limit_combo.addItem(self.tr_("cqi_tg_links_limit_n", n=n), n)
         header.addWidget(self.tg_links_limit_combo)
+        # Excludes posts from channels below this follower count from the
+        # ranking entirely — a tiny channel's best post can still have a
+        # sky-high ERV% just from a small, highly-engaged audience, which
+        # otherwise crowds out posts from bigger channels worth featuring.
+        self.min_followers_combo = QComboBox()
+        self.min_followers_combo.setToolTip(self.tr_("cqi_min_followers_hint"))
+        self.min_followers_combo.addItem(self.tr_("cqi_min_followers_none"), 0)
+        for n in (100, 300, 500, 1000, 1500, 2000):
+            self.min_followers_combo.addItem(self.tr_("cqi_min_followers_n", n=n), n)
+        header.addWidget(self.min_followers_combo)
         # Off by default — a text-only post still has a real ERV% score and
         # may well be one of the best-ranked ones; this just lets you focus
         # on media when that's what you're after (e.g. before a "Fetch
@@ -185,6 +214,7 @@ class ContentQualityView(QWidget):
         self.hide_non_media_chk.setToolTip(self.tr_("cqi_hide_non_media_hint"))
         header.addWidget(self.hide_non_media_chk)
         page.addLayout(header)
+        page.addSpacing(16)
 
         # One row: period mode on the left, folder picker on the right —
         # they're unrelated controls but both narrow, so sharing a row
@@ -215,13 +245,14 @@ class ContentQualityView(QWidget):
         self.folder_combo.setMinimumWidth(220)
         mode_row.addWidget(self.folder_combo)
         page.addLayout(mode_row)
+        page.addSpacing(16)
 
         self.picker_container = QWidget()
         self.picker_lay = QVBoxLayout(self.picker_container)
         self.picker_lay.setContentsMargins(0, 0, 0, 0)
         self.picker_lay.setSpacing(8)
         page.addWidget(self.picker_container)
-        page.addWidget(hline())
+        page.addSpacing(6)
 
         self.no_folders_lbl = QLabel(self.tr_("folder_stat_no_folders"))
         self.no_folders_lbl.setObjectName("navEmpty")
@@ -261,8 +292,10 @@ class ContentQualityView(QWidget):
         self.mode_month_btn.toggled.connect(lambda c: self._on_mode_toggled("month", c))
         self.mode_year_btn.toggled.connect(lambda c: self._on_mode_toggled("year", c))
         self.mode_season_btn.setChecked(True)
-        self.tg_links_limit_combo.currentIndexChanged.connect(self._on_channel_limit_changed)
+        self.tg_links_limit_combo.currentIndexChanged.connect(self._on_filter_changed)
         self.hide_non_media_chk.toggled.connect(lambda _c: self._rebuild_cards())
+        self.min_followers_combo.currentIndexChanged.connect(self._on_filter_changed)
+        self.max_posts_combo.currentIndexChanged.connect(self._on_filter_changed)
 
     def resizeEvent(self, event) -> None:  # noqa: N802 (Qt naming)
         super().resizeEvent(event)
@@ -536,22 +569,29 @@ class ContentQualityView(QWidget):
 
     def _channel_limited_entries(self) -> list[dict]:
         """`self._post_entries` (already best-first, unbounded — see
-        _collect_posts) capped to at most N posts per channel, N = the Tg
-        Links limit combo's current value (0 = no cap), *and* to at most
-        MAX_POSTS_SHOWN posts overall — shared by the grid and the
-        generated Tg Links list so both always agree on which posts are
-        "in scope". Applying the per-channel cap here, before the overall
-        cap, means a restrictive limit still fills up to MAX_POSTS_SHOWN
-        by reaching further down the ranked list across other channels,
-        the same as when no limit is set at all."""
+        _collect_posts), with non-media posts and posts from channels below
+        the minimum-followers threshold dropped first (see hide_non_media_chk/
+        min_followers_combo), then capped to at most N posts per channel,
+        N = the Tg Links limit combo's current value (0 = no cap), *and* to
+        at most the max-posts combo's current value overall (default
+        MAX_POSTS_SHOWN) — shared by the grid and the generated Tg Links
+        list so both always agree on which posts are "in scope". Applying
+        the per-channel cap here, before the overall cap, means a
+        restrictive limit still fills up to the overall cap by reaching
+        further down the ranked list across other channels, the same as
+        when no limit is set at all."""
         limit = int(self.tg_links_limit_combo.currentData() or 0)
         hide_non_media = self.hide_non_media_chk.isChecked()
+        min_followers = int(self.min_followers_combo.currentData() or 0)
+        max_posts = int(self.max_posts_combo.currentData() or MAX_POSTS_SHOWN)
         seen: dict[str, int] = {}
         out: list[dict] = []
         for entry in self._post_entries:
-            if len(out) >= MAX_POSTS_SHOWN:
+            if len(out) >= max_posts:
                 break
             if hide_non_media and not (entry["row"].get("media_type") or ""):
+                continue
+            if min_followers and _channel_members(entry["channel"]) < min_followers:
                 continue
             if limit:
                 key = _channel_ref(entry["channel"])
@@ -562,7 +602,7 @@ class ContentQualityView(QWidget):
             out.append(entry)
         return out
 
-    def _on_channel_limit_changed(self, _index: int) -> None:
+    def _on_filter_changed(self, _index: int) -> None:
         self._rebuild_cards()
 
     def _rebuild_cards(self) -> None:
@@ -712,12 +752,32 @@ class ContentQualityView(QWidget):
     def _build_tg_links_text(self) -> str:
         header = self.tr_("cqi_tg_links_header", folder=self.folder_combo.currentText(),
                           period=self._current_period_label())
-        lines = [header]
-        for i, entry in enumerate(self._channel_limited_entries(), 1):
+        entries = self._channel_limited_entries()
+        lines = [header, ""]
+
+        # "Best N authors": channels ranked by how many of the posts below
+        # are theirs — same `entries` the post list uses, so the two
+        # sections always agree on what's "in scope" for this export.
+        counts: dict[str, int] = {}
+        channel_by_ref: dict[str, dict] = {}
+        for entry in entries:
+            ref = _channel_ref(entry["channel"])
+            counts[ref] = counts.get(ref, 0) + 1
+            channel_by_ref.setdefault(ref, entry["channel"])
+        top_authors = sorted(counts.items(), key=lambda kv: kv[1], reverse=True)[:TOP_AUTHORS_SHOWN]
+        if top_authors:
+            lines.append(self.tr_("cqi_tg_links_top_authors_title", n=len(top_authors)))
+            for i, (ref, count) in enumerate(top_authors, 1):
+                label = _channel_label(channel_by_ref[ref])
+                lines.append(f"{i}. {count} {label}")
+            lines.append("")
+
+        for i, entry in enumerate(entries, 1):
             row = entry["row"]
             score = round(post_gauge_value(entry["raw_score"]))
             text = " ".join((row.get("text") or "").split())
-            snippet = text[:24] + ("…" if len(text) > 24 else "")
+            snippet = (text[:_TG_LINKS_SNIPPET_LEN]
+                      + ("…" if len(text) > _TG_LINKS_SNIPPET_LEN else ""))
             link = build_post_link(_channel_ref(entry["channel"]), row.get("id", 0))
             link = link.removeprefix("https://")
             lines.append(f"{i}. {score} 📊 {snippet} {link}")
@@ -738,11 +798,20 @@ class ContentQualityView(QWidget):
             self.fetch_media_btn.setText(self.tr_("cqi_fetch_media"))
         self.tg_links_btn.setText(self.tr_("cqi_tg_links"))
         self.tg_links_btn.setToolTip(self.tr_("cqi_tg_links_hint"))
+        self.max_posts_combo.setToolTip(self.tr_("cqi_max_posts_hint"))
+        for i in range(self.max_posts_combo.count()):
+            n = self.max_posts_combo.itemData(i)
+            self.max_posts_combo.setItemText(i, self.tr_("cqi_max_posts_n", n=n))
         self.tg_links_limit_combo.setToolTip(self.tr_("cqi_tg_links_limit_hint"))
         self.tg_links_limit_combo.setItemText(0, self.tr_("cqi_tg_links_limit_none"))
         for i in range(1, self.tg_links_limit_combo.count()):
             n = self.tg_links_limit_combo.itemData(i)
             self.tg_links_limit_combo.setItemText(i, self.tr_("cqi_tg_links_limit_n", n=n))
+        self.min_followers_combo.setToolTip(self.tr_("cqi_min_followers_hint"))
+        self.min_followers_combo.setItemText(0, self.tr_("cqi_min_followers_none"))
+        for i in range(1, self.min_followers_combo.count()):
+            n = self.min_followers_combo.itemData(i)
+            self.min_followers_combo.setItemText(i, self.tr_("cqi_min_followers_n", n=n))
         self.hide_non_media_chk.setText(self.tr_("cqi_hide_non_media"))
         self.hide_non_media_chk.setToolTip(self.tr_("cqi_hide_non_media_hint"))
         self.pick_lbl.setText(self.tr_("folder_stat_pick_folder"))
