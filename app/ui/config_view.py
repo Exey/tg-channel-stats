@@ -461,7 +461,17 @@ class ConfigView(QWidget):
         for label, mode, key in self._collect_export_periods():
             self.folders_export_period_combo.addItem(label, (mode, key))
         self.folders_export_period_combo.addItem(self.tr_("period_year_all"), ("all", None))
-        idx = self.folders_export_period_combo.findData(current) if current else -1
+        # Not combo.findData(current) — PySide6 can't reliably match a
+        # tuple-valued itemData (our (mode, period_key) pairs) through
+        # QVariant equality, so it always misses and silently resets the
+        # selection back to index 0. A plain Python == comparison over
+        # itemData works correctly for tuples.
+        idx = -1
+        if current is not None:
+            for i in range(self.folders_export_period_combo.count()):
+                if self.folders_export_period_combo.itemData(i) == current:
+                    idx = i
+                    break
         self.folders_export_period_combo.setCurrentIndex(idx if idx >= 0 else 0)
         self.folders_export_period_combo.blockSignals(False)
 
