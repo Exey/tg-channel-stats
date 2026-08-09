@@ -215,6 +215,9 @@ class FolderStatView(QWidget):
         self.mode_season_btn = QPushButton(self.tr_("period_mode_season"))
         self.mode_season_btn.setObjectName("ghost")
         self.mode_season_btn.setCheckable(True)
+        self.mode_halfyear_btn = QPushButton(self.tr_("period_mode_halfyear"))
+        self.mode_halfyear_btn.setObjectName("ghost")
+        self.mode_halfyear_btn.setCheckable(True)
         self.mode_month_btn = QPushButton(self.tr_("period_mode_month"))
         self.mode_month_btn.setObjectName("ghost")
         self.mode_month_btn.setCheckable(True)
@@ -224,6 +227,7 @@ class FolderStatView(QWidget):
         self._mode_btn_group = QButtonGroup(self)
         self._mode_btn_group.setExclusive(True)
         self._mode_btn_group.addButton(self.mode_season_btn)
+        self._mode_btn_group.addButton(self.mode_halfyear_btn)
         self._mode_btn_group.addButton(self.mode_month_btn)
         self._mode_btn_group.addButton(self.mode_year_btn)
 
@@ -262,12 +266,15 @@ class FolderStatView(QWidget):
         # Every widget the toggle handler touches now exists, so it's safe to
         # wire the signal and set the default mode (which fires it once).
         self.mode_season_btn.toggled.connect(lambda checked: self._on_mode_toggled("season", checked))
+        self.mode_halfyear_btn.toggled.connect(
+            lambda checked: self._on_mode_toggled("halfyear", checked))
         self.mode_month_btn.toggled.connect(lambda checked: self._on_mode_toggled("month", checked))
         self.mode_year_btn.toggled.connect(lambda checked: self._on_mode_toggled("year", checked))
         self.mode_season_btn.setChecked(True)
 
         mode_row = QHBoxLayout()
         mode_row.addWidget(self.mode_season_btn)
+        mode_row.addWidget(self.mode_halfyear_btn)
         mode_row.addWidget(self.mode_month_btn)
         mode_row.addWidget(self.mode_year_btn)
         mode_row.addStretch()
@@ -647,7 +654,10 @@ class FolderStatView(QWidget):
             return
 
         keys_labels = self._collect_all_period_keys(self._period_mode)
-        if self._period_mode == "season":
+        if self._period_mode in ("season", "halfyear"):
+            # Both are a flat, single-scroll row of buttons (one per
+            # period key) — the season picker's builder works unchanged
+            # for half-years too, unlike the month picker's per-year grid.
             self._build_season_picker(keys_labels)
         else:
             self._build_month_picker(keys_labels)
@@ -829,6 +839,7 @@ class FolderStatView(QWidget):
         self.period_card_ref.title_lbl.setText(self.tr_("folder_stat_period_title"))
         self.period_hint_lbl.setText(self.tr_("folder_stat_period_hint"))
         self.mode_season_btn.setText(self.tr_("period_mode_season"))
+        self.mode_halfyear_btn.setText(self.tr_("period_mode_halfyear"))
         self.mode_month_btn.setText(self.tr_("period_mode_month"))
         self.mode_year_btn.setText(self.tr_("period_mode_year"))
         for key, btn in self._year_btns.items():

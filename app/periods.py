@@ -17,7 +17,8 @@ SEASON_ORDER = {"Winter": 0, "Spring": 1, "Summer": 2, "Fall": 3}
 
 def period_key_label(year: int, month: int, mode: str) -> tuple[tuple, str]:
     """(sort_key, display_label) for a calendar month, grouped into a season
-    when mode == "season" (else the month itself)."""
+    when mode == "season", a calendar half (Jan-Jun / Jul-Dec) when
+    mode == "halfyear", else the month itself."""
     if mode == "season":
         season = SEASON_BY_MONTH[month]
         year = year + 1 if month == 12 else year
@@ -26,6 +27,9 @@ def period_key_label(year: int, month: int, mode: str) -> tuple[tuple, str]:
         else:
             label = f"{season} {year}"
         return (year, SEASON_ORDER[season]), label
+    if mode == "halfyear":
+        half = 1 if month <= 6 else 2
+        return (year, half), f"{year} H{half}"
     return (year, month), f"{year:04d}-{month:02d}"
 
 

@@ -47,6 +47,16 @@ EN = {
     "folder_export_col_folder": "Folder",
     "folder_export_col_followers": "Followers",
     "folder_export_col_id": "ID/Username",
+    "folder_export_extra_cols": "Rating, views, viral share",
+    "folder_export_extra_cols_hint": "Add Rating (average post quality "
+                                     "gauge), Views (average views per "
+                                     "post) and Viral share columns — "
+                                     "reads every channel's full checkpoint, "
+                                     "not just the sidebar summary.",
+    "folder_export_period_hint": "Which period Rating/Views/Viral share are "
+                                 "computed over — the channel's most recent "
+                                 "half-year or season, or its whole "
+                                 "all-time stats.",
     "folder_comments_refresh_label": "Refresh comments for:",
     "folder_comments_refresh_btn": "💬 Refresh comments",
     "folder_comments_refresh_hint": "Re-fetch just the comment count for "
@@ -105,6 +115,7 @@ EN = {
                                "left blank — fill them in later.",
     "period_mode_month": "Monthly",
     "period_mode_season": "Seasonal",
+    "period_mode_halfyear": "Half-Year",
     "period_mode_year": "Year",
     "period_year_half": "Half-year",
     "period_year_1y": "Last Year",
@@ -393,6 +404,17 @@ RU = {
     "folder_export_col_folder": "Папка",
     "folder_export_col_followers": "Подписчики",
     "folder_export_col_id": "ID/Юзернейм",
+    "folder_export_extra_cols": "Рейтинг, просмотры, доля виральных",
+    "folder_export_extra_cols_hint": "Добавить колонки Рейтинг (средний "
+                                     "балл качества постов), Просмотры "
+                                     "(среднее число просмотров на пост) и "
+                                     "Доля виральных — читает полный "
+                                     "чекпоинт каждого канала, а не только "
+                                     "сводку из боковой панели.",
+    "folder_export_period_hint": "За какой период считать Рейтинг/"
+                                 "Просмотры/Долю виральных — последнее "
+                                 "полугодие или сезон канала, либо вся "
+                                 "статистика за всё время.",
     "folder_comments_refresh_label": "Обновить комментарии для:",
     "folder_comments_refresh_btn": "💬 Обновить комментарии",
     "folder_comments_refresh_hint": "Заново получить только число "
@@ -454,6 +476,7 @@ RU = {
                                "заполните их позже.",
     "period_mode_month": "По месяцам",
     "period_mode_season": "По сезонам",
+    "period_mode_halfyear": "По полугодиям",
     "period_mode_year": "Год",
     "period_year_half": "Полгода",
     "period_year_1y": "Последний год",

@@ -20,6 +20,7 @@ from PySide6.QtWidgets import (
 
 from ..config import CONN_FIELDS, config_dir
 from ..folders import FolderStore
+from ..periods import period_key_label
 from ..store import ChannelStore
 from ..tags import TagStore
 from ..tools.channel_stat import run_channel_stat
@@ -27,10 +28,16 @@ from ..tools.comments_refresh import run_comments_refresh
 from ..worker import CheckLoginWorker, ToolWorker
 from .dashboard_view import fmt_int
 from .folder_dialog import FolderManagerDialog
+from .folder_stat_view import FolderStatView
 from .qr_login_dialog import QrLoginDialog
 from .widgets import Card, SectionCard
 
 PERIOD_KEYS = ["2y", "3y", "all"]
+
+
+def _channel_display_name(ch: dict) -> str:
+    username = ch.get("username") or ""
+    return f"@{username}" if username else (ch.get("title") or ch.get("key", "?"))
 
 
 class ConfigView(QWidget):
@@ -241,12 +248,33 @@ class ConfigView(QWidget):
         self.folders_manage_btn = QPushButton(self.tr_("folder_manage"))
         self.folders_manage_btn.clicked.connect(self._open_folder_manager)
         row.addWidget(self.folders_manage_btn)
+        row.addStretch()
+        card.body.addLayout(row)
+
+        export_row = QHBoxLayout()
         self.folders_export_md_btn = QPushButton(self.tr_("folder_export_md_btn"))
         self.folders_export_md_btn.setToolTip(self.tr_("folder_export_md_hint"))
         self.folders_export_md_btn.clicked.connect(self._on_export_folders_md)
-        row.addWidget(self.folders_export_md_btn)
-        row.addStretch()
-        card.body.addLayout(row)
+        export_row.addWidget(self.folders_export_md_btn)
+        self.folders_export_extra_chk = QCheckBox(self.tr_("folder_export_extra_cols"))
+        self.folders_export_extra_chk.setToolTip(self.tr_("folder_export_extra_cols_hint"))
+        self.folders_export_extra_chk.toggled.connect(
+            lambda on: self.folders_export_period_combo.setEnabled(on))
+        export_row.addWidget(self.folders_export_extra_chk)
+        export_row.addStretch()
+        # Which specific period Rating/Views/Viral share are computed over
+        # — every Half-Year bucket across all tracked channels (newest
+        # first), then every Season bucket the same way, then a trailing
+        # "All time" entry (see _collect_export_periods/
+        # _channel_period_metrics). No "Monthly" entries on purpose: a
+        # single calendar month is too noisy a window for a per-channel
+        # export meant to compare many channels at a glance.
+        self.folders_export_period_combo = QComboBox()
+        self.folders_export_period_combo.setToolTip(self.tr_("folder_export_period_hint"))
+        self.folders_export_period_combo.setEnabled(self.folders_export_extra_chk.isChecked())
+        self.refresh_export_periods()
+        export_row.addWidget(self.folders_export_period_combo)
+        card.body.addLayout(export_row)
 
         # Lightweight partial re-fetch: only patches the `comments` field on
         # each channel's already-stored checkpoint rows (see
@@ -294,6 +322,8 @@ class ConfigView(QWidget):
         self.tags_list_lbl = QLabel()
         self.tags_list_lbl.setObjectName("hint")
         self.tags_list_lbl.setWordWrap(True)
+        self.tags_list_lbl.setTextFormat(Qt.TextFormat.RichText)
+        self.tags_list_lbl.setStyleSheet("font-size: 14px;")
         card.body.addWidget(self.tags_list_lbl)
 
         row = QHBoxLayout()
@@ -308,15 +338,32 @@ class ConfigView(QWidget):
         return card
 
     def refresh_tags_list(self) -> None:
+        """One tag per line, biggest tag (most assigned channels) first,
+        each followed by up to 3 of its biggest channels by followers — a
+        quick "what's actually in this tag" glance without opening the
+        sidebar's right-click menu on every channel."""
         tags = self.tag_store.list_tags()
         if not tags:
             self.tags_list_lbl.setText(self.tr_("tag_list_empty"))
             return
-        counts: dict[str, int] = {}
-        for name in self.tag_store.assignments.values():
-            counts[name] = counts.get(name, 0) + 1
-        chips = [f"{html.escape(t['name'])} ({counts.get(t['name'], 0)})" for t in tags]
-        self.tags_list_lbl.setText("&nbsp;&nbsp;&nbsp;".join(chips))
+        summaries = {s["key"]: s for s in self.channel_store.list()}
+        channels_by_tag: dict[str, list[dict]] = {}
+        for key, name in self.tag_store.assignments.items():
+            channels_by_tag.setdefault(name, []).append(summaries.get(key, {"key": key}))
+
+        rows = []
+        for t in tags:
+            channels = sorted(channels_by_tag.get(t["name"], []),
+                              key=lambda c: c.get("members", 0) or 0, reverse=True)
+            rows.append((len(channels), t["name"], channels[:3]))
+        rows.sort(key=lambda r: r[0], reverse=True)
+
+        lines = []
+        for count, name, top in rows:
+            examples = ", ".join(html.escape(_channel_display_name(c)) for c in top)
+            suffix = f" ({examples})" if examples else ""
+            lines.append(f"{count} — {html.escape(name)}{suffix}")
+        self.tags_list_lbl.setText("<br>".join(lines))
 
     def _on_load_tags_md(self) -> None:
         start_dir = str(Path(self.tag_store.source_path).parent) if self.tag_store.source_path \
@@ -365,6 +412,8 @@ class ConfigView(QWidget):
         self.assign_all_combo.setVisible(has_folders)
         self.assign_all_btn.setVisible(has_folders)
 
+        self.refresh_export_periods()
+
         folders = self.folder_store.list_folders()
         if not folders:
             self.folders_list_lbl.setText(self.tr_("folder_list_empty"))
@@ -379,6 +428,43 @@ class ConfigView(QWidget):
         ]
         self.folders_list_lbl.setText("&nbsp;&nbsp;&nbsp;".join(chips))
 
+    def _collect_export_periods(self) -> list[tuple[str, str, tuple]]:
+        """(label, mode, period_key) for every Half-Year bucket across all
+        tracked channels regardless of folder (newest first), then every
+        Season bucket the same way — matches FolderStatView's own period
+        picker (see its _collect_all_period_keys), just flattened into one
+        combo here instead of mode buttons on their own page."""
+        def keys_for(mode: str) -> list[tuple[str, str, tuple]]:
+            keys: dict[tuple, str] = {}
+            for summary in self.channel_store.list():
+                data = self.channel_store.load(summary["key"])
+                if not data:
+                    continue
+                for m in data.get("distributions", {}).get("monthly") or []:
+                    if not int(m.get("count", 0) or 0):
+                        continue
+                    try:
+                        year, month = (int(x) for x in m.get("label", "").split("-"))
+                    except ValueError:
+                        continue
+                    key, label = period_key_label(year, month, mode)
+                    keys[key] = label
+            return [(label, mode, key) for key, label in
+                    sorted(keys.items(), key=lambda kv: kv[0], reverse=True)]
+
+        return keys_for("halfyear") + keys_for("season")
+
+    def refresh_export_periods(self) -> None:
+        current = self.folders_export_period_combo.currentData()
+        self.folders_export_period_combo.blockSignals(True)
+        self.folders_export_period_combo.clear()
+        for label, mode, key in self._collect_export_periods():
+            self.folders_export_period_combo.addItem(label, (mode, key))
+        self.folders_export_period_combo.addItem(self.tr_("period_year_all"), ("all", None))
+        idx = self.folders_export_period_combo.findData(current) if current else -1
+        self.folders_export_period_combo.setCurrentIndex(idx if idx >= 0 else 0)
+        self.folders_export_period_combo.blockSignals(False)
+
     def _open_folder_manager(self) -> None:
         dlg = FolderManagerDialog(self.folder_store, self.i18n, self)
         dlg.exec()
@@ -390,25 +476,130 @@ class ConfigView(QWidget):
         """One row per tracked channel, grouped/sorted exactly like the
         sidebar's "Sort Fols" toggle (see FolderStore.sorted_by_folder) —
         folder list order, unassigned channels last, followers descending
-        within each group."""
+        within each group. Rating/Views/Viral share (see
+        folders_export_extra_chk) reuse FolderStatView._score_entries so
+        they come out numerically identical to what Folder Stats itself
+        would show for the same folder/period — see
+        _collect_export_metrics."""
         summaries = self.folder_store.sorted_by_folder(self.channel_store.list())
         folder_name = {f["id"]: f["name"] for f in self.folder_store.list_folders()}
-        lines = [
-            "| " + " | ".join([self.tr_("folder_export_col_folder"),
-                               self.tr_("folder_export_col_followers"),
-                               self.tr_("folder_export_col_id"),
-                               self.tr_("folder_export_col_tag")]) + " |",
-            "| --- | --- | --- | --- |",
-        ]
+        extra = self.folders_export_extra_chk.isChecked()
+
+        headers = [self.tr_("folder_export_col_folder"), self.tr_("folder_export_col_followers"),
+                  self.tr_("folder_export_col_id"), self.tr_("folder_export_col_tag")]
+        if extra:
+            headers += [self.tr_("col_rating"), self.tr_("col_views"),
+                       self.tr_("col_viral_share")]
+        lines = ["| " + " | ".join(headers) + " |",
+                 "| " + " | ".join(["---"] * len(headers)) + " |"]
+
+        metrics_by_key: dict[str, tuple] = {}
+        if extra:
+            mode, target_key = self.folders_export_period_combo.currentData() or ("all", None)
+            metrics_by_key = self._collect_export_metrics(summaries, mode, target_key)
+
         for ch in summaries:
             fid = self.folder_store.folder_for_channel(ch["key"])
             folder = folder_name.get(fid, self.tr_("folder_none"))
             username = ch.get("username") or ""
-            ident = f"@{username}" if username else ch["key"]
+            if username:
+                ident = f"@{username}"
+            else:
+                # No public username to link to — a title snippet reads
+                # better in the exported table than the bare checkpoint
+                # key, with the id still there in parens for a lookup.
+                title = ch.get("title") or ch["key"]
+                ident = f"{title[:18]}({ch['key']})"
             tag = self.tag_store.tag_for_channel(ch["key"]) or ""
-            lines.append(
-                f"| {folder} | {fmt_int(ch.get('members', 0))} | {ident} | {tag} |")
+            row = [folder, fmt_int(ch.get("members", 0)), ident, tag]
+            if extra:
+                metrics = metrics_by_key.get(ch["key"])
+                if metrics is None:
+                    row += ["—", "—", "—"]
+                else:
+                    score, views, viral_share = metrics
+                    row += [f"{score:.3f}", fmt_int(views), f"{viral_share:.1f}%"]
+            lines.append("| " + " | ".join(row) + " |")
         return "\n".join(lines) + "\n"
+
+    def _collect_export_metrics(self, summaries: list[dict], mode: str,
+                                target_key: tuple | None) -> dict[str, tuple]:
+        """channel key -> (score, views, viral_share_pct), scored exactly
+        like FolderStatView's Periodic Stats: entries are grouped by folder
+        (channels with no folder form their own group) and normalized
+        against only their own group's peers for the same period, via
+        FolderStatView._score_entries — that's what makes a channel's
+        Rating here match what Folder Stats itself would show, unlike a
+        channel-global metric which couldn't reproduce that per-folder
+        normalization at all."""
+        groups: dict[str | None, list[str]] = {}
+        for ch in summaries:
+            fid = self.folder_store.folder_for_channel(ch["key"])
+            groups.setdefault(fid, []).append(ch["key"])
+
+        out: dict[str, tuple] = {}
+        for keys in groups.values():
+            entries = []
+            for key in keys:
+                data = self.channel_store.load(key) or {}
+                totals = self._channel_bucket_totals(data, mode, target_key)
+                if totals is None:
+                    continue
+                entries.append({"key": key, **totals})
+            if not entries:
+                continue
+            FolderStatView._score_entries(entries)
+            for e in entries:
+                out[e["key"]] = (e["score"], e["views"], e["viral_share"])
+        return out
+
+    @staticmethod
+    def _channel_bucket_totals(data: dict, mode: str,
+                               target_key: tuple | None) -> dict | None:
+        """{"views","shares","reactions","viral_share"} totals for one
+        channel's full checkpoint, scoped to `mode` — "all" sums every
+        scanned post ever (`distributions.monthly`); "halfyear"/"season"
+        use just the one bucket matching `target_key`. None if the channel
+        has no data in scope at all (empty monthly history for "all", or no
+        bucket matching `target_key`), so the caller can tell "genuinely no
+        data" apart from "scored zero"."""
+        monthly = data.get("distributions", {}).get("monthly") or []
+        if mode == "all":
+            if not monthly:
+                return None
+            count = sum(int(m.get("count", 0) or 0) for m in monthly)
+            viral_count = sum(int(m.get("viral_count", 0) or 0) for m in monthly)
+            return {
+                "views": sum(int(m.get("views", 0) or 0) for m in monthly),
+                "shares": sum(int(m.get("shares", 0) or 0) for m in monthly),
+                "reactions": sum(int(m.get("reactions", 0) or 0) for m in monthly),
+                "viral_share": viral_count / count * 100 if count else 0,
+            }
+
+        buckets: dict[tuple, dict] = {}
+        for m in monthly:
+            count = int(m.get("count", 0) or 0)
+            if not count:
+                continue
+            try:
+                year, month = (int(x) for x in m.get("label", "").split("-"))
+            except ValueError:
+                continue
+            key, _label = period_key_label(year, month, mode)
+            b = buckets.setdefault(key, {"count": 0, "views": 0, "shares": 0,
+                                         "reactions": 0, "viral_count": 0})
+            b["count"] += count
+            b["views"] += int(m.get("views", 0) or 0)
+            b["shares"] += int(m.get("shares", 0) or 0)
+            b["reactions"] += int(m.get("reactions", 0) or 0)
+            b["viral_count"] += int(m.get("viral_count", 0) or 0)
+        if target_key not in buckets:
+            return None
+        b = buckets[target_key]
+        return {
+            "views": b["views"], "shares": b["shares"], "reactions": b["reactions"],
+            "viral_share": b["viral_count"] / b["count"] * 100 if b["count"] else 0,
+        }
 
     def _on_export_folders_md(self) -> None:
         if not self.channel_store.list():
@@ -470,6 +661,10 @@ class ConfigView(QWidget):
         self.folders_manage_btn.setText(self.tr_("folder_manage"))
         self.folders_export_md_btn.setText(self.tr_("folder_export_md_btn"))
         self.folders_export_md_btn.setToolTip(self.tr_("folder_export_md_hint"))
+        self.folders_export_extra_chk.setText(self.tr_("folder_export_extra_cols"))
+        self.folders_export_extra_chk.setToolTip(self.tr_("folder_export_extra_cols_hint"))
+        self.folders_export_period_combo.setToolTip(self.tr_("folder_export_period_hint"))
+        self.refresh_export_periods()
         self.comments_refresh_lbl.setText(self.tr_("folder_comments_refresh_label"))
         self.refresh_comments_btn.setText(self.tr_("folder_comments_refresh_btn"))
         self.refresh_comments_btn.setToolTip(self.tr_("folder_comments_refresh_hint"))
