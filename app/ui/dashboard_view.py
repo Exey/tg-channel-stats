@@ -8,6 +8,7 @@ set, kept intact.
 """
 from __future__ import annotations
 
+import html
 import re
 from datetime import datetime
 
@@ -211,6 +212,13 @@ class DashboardView(QWidget):
         titles.addWidget(self.title_lbl)
         self.sub_lbl = QLabel("")
         self.sub_lbl.setObjectName("pageSub")
+        self.sub_lbl.setTextFormat(Qt.TextFormat.RichText)
+        # TextBrowserInteraction (not just LinksAccessibleByMouse) is what
+        # makes Qt show a pointing-hand cursor over the <a> below and an
+        # ordinary one elsewhere in the label, with no manual cursor
+        # tracking needed.
+        self.sub_lbl.setTextInteractionFlags(Qt.TextInteractionFlag.TextBrowserInteraction)
+        self.sub_lbl.setOpenExternalLinks(True)
         titles.addWidget(self.sub_lbl)
         head.addLayout(titles)
         head.addStretch()
@@ -693,20 +701,27 @@ class DashboardView(QWidget):
         self.tags_changed.emit()
 
     def _header_sub(self) -> str:
+        # Rich text (see sub_lbl's setTextFormat) so the channel link below
+        # can be a real clickable <a> — every other part is plain
+        # translated/formatted text, still escaped in case it ever contains
+        # HTML-sensitive characters, and joined with &nbsp; instead of
+        # literal spaces since HTML collapses repeated whitespace.
         parts = []
         period = self._data.get("period") or "all"
-        parts.append(self.tr_("dash_period_label",
-                              period=self.tr_(f"period_{period}")))
+        parts.append(html.escape(self.tr_("dash_period_label",
+                                          period=self.tr_(f"period_{period}"))))
         created = self._fmt_date(self._data.get("info", {}).get("created", ""))
         if created:
-            parts.append(self.tr_("dash_created_label", when=created))
+            parts.append(html.escape(self.tr_("dash_created_label", when=created)))
         when = self._fmt_datetime(self._data.get("fetched_at", ""))
         if when:
-            parts.append(self.tr_("dash_fetched_at", when=when))
+            parts.append(html.escape(self.tr_("dash_fetched_at", when=when)))
         link = self._data.get("link")
         if link:
-            parts.append(link)
-        return "   ·   ".join(parts)
+            safe_link = html.escape(link)
+            parts.append(f'<a href="{safe_link}" style="color:{COLORS["accent"]};'
+                         f'text-decoration:none;">{safe_link}</a>')
+        return "&nbsp;&nbsp;&nbsp;·&nbsp;&nbsp;&nbsp;".join(parts)
 
     def _fill_cards(self) -> None:
         info = self._data.get("info", {})
