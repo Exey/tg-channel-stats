@@ -365,8 +365,9 @@ class NavButton(QPushButton):
         self.setCheckable(True)
         self.setCursor(Qt.CursorShape.PointingHandCursor)
         self._icon_name = icon_name
-        self._folder_color: str | None = None
-        self._folder_name: str | None = None
+        self._badge_text: str | None = None
+        self._badge_color: str | None = None
+        self._badge_tooltip: str | None = None
 
         lay = QHBoxLayout(self)
         lay.setContentsMargins(12, 0, 12, 0)
@@ -394,7 +395,18 @@ class NavButton(QPushButton):
     def _sync_icon(self, checked: bool) -> None:
         if not self._icon_name:
             return
-        color = self._folder_color or (COLORS["accent"] if checked else COLORS["muted"])
+        if self._badge_text:
+            # A folder/tag abbreviation takes over the icon slot entirely —
+            # plain colored text, no SVG underneath it.
+            self._icon.setPixmap(QPixmap())
+            self._icon.setText(self._badge_text)
+            self._icon.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            self._icon.setStyleSheet(
+                f"color: {self._badge_color}; font-size: 9px; font-weight: 800;")
+            return
+        self._icon.setText("")
+        self._icon.setStyleSheet("")
+        color = COLORS["accent"] if checked else COLORS["muted"]
         self._icon.setPixmap(svg_pixmap(self._icon_name, color, 20))
 
     def set_text(self, text: str) -> None:
@@ -403,17 +415,26 @@ class NavButton(QPushButton):
     def set_meta(self, text: str) -> None:
         self._meta.setText(text)
 
-    def set_folder_color(self, color: str | None, name: str | None = None) -> None:
-        self._folder_color = color
-        self._folder_name = name if color else None
+    def set_badge(self, text: str, color: str, tooltip: str = "") -> None:
+        """2-3 letter colored abbreviation replacing the plain SVG icon —
+        used by the sidebar channel list for a folder/tag abbreviation (see
+        SidePanel.refresh_badges) once a channel has one assigned."""
+        self._badge_text = text
+        self._badge_color = color
+        self._badge_tooltip = tooltip
+        self._sync_icon(self.isChecked())
+
+    def clear_badge(self) -> None:
+        self._badge_text = None
+        self._badge_tooltip = None
         self._sync_icon(self.isChecked())
 
     def event(self, e) -> bool:
-        # Hovering the icon shows the assigned folder's name, distinct from
-        # the button's own tooltip (channel/title) covering the rest of it.
-        if (e.type() == QEvent.Type.ToolTip and self._folder_name
+        # Hovering the icon shows what it's an abbreviation of, distinct
+        # from the button's own tooltip (channel/title) covering the rest.
+        if (e.type() == QEvent.Type.ToolTip and self._badge_tooltip
                 and self._icon.geometry().contains(e.pos())):
-            QToolTip.showText(e.globalPos(), self._folder_name, self)
+            QToolTip.showText(e.globalPos(), self._badge_tooltip, self)
             return True
         return super().event(e)
 

@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import html
 import json
+from pathlib import Path
 
 from PySide6.QtCore import Qt, QUrl, Signal
 from PySide6.QtGui import QDesktopServices
@@ -20,6 +21,7 @@ from PySide6.QtWidgets import (
 from ..config import CONN_FIELDS, config_dir
 from ..folders import FolderStore
 from ..store import ChannelStore
+from ..tags import TagStore
 from ..tools.channel_stat import run_channel_stat
 from ..tools.comments_refresh import run_comments_refresh
 from ..worker import CheckLoginWorker, ToolWorker
@@ -34,14 +36,16 @@ PERIOD_KEYS = ["2y", "3y", "all"]
 class ConfigView(QWidget):
     channel_fetched = Signal(dict)   # full channel_stat payload
     folders_changed = Signal()
+    tags_changed = Signal()
     checkpoints_changed = Signal()   # a folder's checkpoints were updated in place
 
-    def __init__(self, cfg, i18n, folder_store: FolderStore, channel_store: ChannelStore,
-                parent=None) -> None:
+    def __init__(self, cfg, i18n, folder_store: FolderStore, tag_store: TagStore,
+                channel_store: ChannelStore, parent=None) -> None:
         super().__init__(parent)
         self.cfg = cfg
         self.i18n = i18n
         self.folder_store = folder_store
+        self.tag_store = tag_store
         self.channel_store = channel_store
         self.worker: ToolWorker | None = None
         self._build_ui()
@@ -79,7 +83,11 @@ class ConfigView(QWidget):
         root.addWidget(self._connection_card())
         root.addWidget(self._fetch_card())
         root.addWidget(self._instructions_card())
-        root.addWidget(self._folders_card())
+        taxonomy_row = QHBoxLayout()
+        taxonomy_row.setSpacing(18)
+        taxonomy_row.addWidget(self._folders_card(), 1)
+        taxonomy_row.addWidget(self._tags_card(), 1)
+        root.addLayout(taxonomy_row)
         root.addStretch()
 
     def _connection_card(self) -> Card:
@@ -274,6 +282,61 @@ class ConfigView(QWidget):
         self.refresh_folders_list()
         return card
 
+    def _tags_card(self) -> Card:
+        card = SectionCard(self.tr_("tag_section_title"))
+        self.tags_card_ref = card
+
+        self.tags_help_lbl = QLabel(self.tr_("tag_manage_help"))
+        self.tags_help_lbl.setObjectName("hint")
+        self.tags_help_lbl.setWordWrap(True)
+        card.body.addWidget(self.tags_help_lbl)
+
+        self.tags_list_lbl = QLabel()
+        self.tags_list_lbl.setObjectName("hint")
+        self.tags_list_lbl.setWordWrap(True)
+        card.body.addWidget(self.tags_list_lbl)
+
+        row = QHBoxLayout()
+        self.tags_load_btn = QPushButton(self.tr_("tag_load_md_btn"))
+        self.tags_load_btn.setToolTip(self.tr_("tag_load_md_hint"))
+        self.tags_load_btn.clicked.connect(self._on_load_tags_md)
+        row.addWidget(self.tags_load_btn)
+        row.addStretch()
+        card.body.addLayout(row)
+
+        self.refresh_tags_list()
+        return card
+
+    def refresh_tags_list(self) -> None:
+        tags = self.tag_store.list_tags()
+        if not tags:
+            self.tags_list_lbl.setText(self.tr_("tag_list_empty"))
+            return
+        counts: dict[str, int] = {}
+        for name in self.tag_store.assignments.values():
+            counts[name] = counts.get(name, 0) + 1
+        chips = [f"{html.escape(t['name'])} ({counts.get(t['name'], 0)})" for t in tags]
+        self.tags_list_lbl.setText("&nbsp;&nbsp;&nbsp;".join(chips))
+
+    def _on_load_tags_md(self) -> None:
+        start_dir = str(Path(self.tag_store.source_path).parent) if self.tag_store.source_path \
+            else str(Path.home() / "Desktop")
+        path, _ = QFileDialog.getOpenFileName(
+            self, self.tr_("tag_load_md_btn"), start_dir, "Markdown (*.md)")
+        if not path:
+            return
+        try:
+            n = self.tag_store.load_from_md(path)
+        except OSError as exc:
+            QMessageBox.warning(self, self.tr_("app_title"), str(exc))
+            return
+        if n == 0:
+            QMessageBox.warning(self, self.tr_("app_title"), self.tr_("tag_load_md_empty"))
+            return
+        self.refresh_tags_list()
+        self.tags_changed.emit()
+        QMessageBox.information(self, self.tr_("app_title"), self.tr_("tag_load_md_done", n=n))
+
     def refresh_folders_list(self) -> None:
         current_folder_id = self.comments_folder_combo.currentData()
         self.comments_folder_combo.blockSignals(True)
@@ -333,15 +396,18 @@ class ConfigView(QWidget):
         lines = [
             "| " + " | ".join([self.tr_("folder_export_col_folder"),
                                self.tr_("folder_export_col_followers"),
-                               self.tr_("folder_export_col_id")]) + " |",
-            "| --- | --- | --- |",
+                               self.tr_("folder_export_col_id"),
+                               self.tr_("folder_export_col_tag")]) + " |",
+            "| --- | --- | --- | --- |",
         ]
         for ch in summaries:
             fid = self.folder_store.folder_for_channel(ch["key"])
             folder = folder_name.get(fid, self.tr_("folder_none"))
             username = ch.get("username") or ""
             ident = f"@{username}" if username else ch["key"]
-            lines.append(f"| {folder} | {fmt_int(ch.get('members', 0))} | {ident} |")
+            tag = self.tag_store.tag_for_channel(ch["key"]) or ""
+            lines.append(
+                f"| {folder} | {fmt_int(ch.get('members', 0))} | {ident} | {tag} |")
         return "\n".join(lines) + "\n"
 
     def _on_export_folders_md(self) -> None:
@@ -411,6 +477,12 @@ class ConfigView(QWidget):
         self.assign_all_btn.setText(self.tr_("folder_assign_all_btn"))
         self.assign_all_btn.setToolTip(self.tr_("folder_assign_all_hint"))
         self.refresh_folders_list()
+
+        self.tags_card_ref.title_lbl.setText(self.tr_("tag_section_title"))
+        self.tags_help_lbl.setText(self.tr_("tag_manage_help"))
+        self.tags_load_btn.setText(self.tr_("tag_load_md_btn"))
+        self.tags_load_btn.setToolTip(self.tr_("tag_load_md_hint"))
+        self.refresh_tags_list()
 
     # ------------------------------------------------------ field helpers
     def _load_fields(self) -> None:

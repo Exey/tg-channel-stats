@@ -13,6 +13,7 @@ from ..config import Config, config_dir
 from ..folders import FolderStore
 from ..i18n import I18n
 from ..store import ChannelStore
+from ..tags import TagStore
 from .compare_charts_view import CompareChartsView
 from .compare_view import CompareView
 from .config_view import ConfigView
@@ -30,6 +31,7 @@ class MainWindow(QMainWindow):
         self.i18n = I18n(self.cfg.language)
         self.store = ChannelStore()
         self.folder_store = FolderStore()
+        self.tag_store = TagStore()
         self.resize(1240, 860)
         self.setMinimumSize(1040, 720)
         self._current_key: str | None = None   # None => Config screen
@@ -53,7 +55,7 @@ class MainWindow(QMainWindow):
         lay.setContentsMargins(0, 0, 0, 0)
         lay.setSpacing(0)
 
-        self.side = SidePanel(self.i18n, self.folder_store)
+        self.side = SidePanel(self.i18n, self.folder_store, self.tag_store)
         self.side.config_selected.connect(self._show_config)
         self.side.folder_stat_selected.connect(self._show_folder_stat)
         self.side.content_quality_selected.connect(self._show_content_quality)
@@ -65,6 +67,7 @@ class MainWindow(QMainWindow):
         self.side.fold_requested.connect(self._fold_sidebar)
         self.side.language_toggle_requested.connect(self._toggle_language)
         self.side.folders_changed.connect(self._on_folders_changed)
+        self.side.tags_changed.connect(self._on_folders_changed)
         lay.addWidget(self.side)
 
         content_col = QVBoxLayout()
@@ -85,14 +88,17 @@ class MainWindow(QMainWindow):
         content_col.addLayout(top_strip)
 
         self.stack = QStackedWidget()
-        self.config_view = ConfigView(self.cfg, self.i18n, self.folder_store, self.store)
+        self.config_view = ConfigView(self.cfg, self.i18n, self.folder_store, self.tag_store,
+                                      self.store)
         self.config_view.channel_fetched.connect(self._on_channel_fetched)
         self.config_view.folders_changed.connect(self._on_folders_changed)
+        self.config_view.tags_changed.connect(self._on_folders_changed)
         self.config_view.checkpoints_changed.connect(self._refresh_sidebar)
-        self.dashboard = DashboardView(self.i18n, self.folder_store, self.cfg)
+        self.dashboard = DashboardView(self.i18n, self.folder_store, self.tag_store, self.cfg)
         self.dashboard.refetch_requested.connect(self._on_refetch)
         self.dashboard.remove_requested.connect(self._on_remove)
         self.dashboard.folders_changed.connect(self._on_folders_changed)
+        self.dashboard.tags_changed.connect(self._on_folders_changed)
         self.compare = CompareView(self.i18n)
         self.folder_stat = FolderStatView(self.i18n, self.folder_store, self.store)
         self.compare_charts = CompareChartsView(self.i18n)
@@ -169,15 +175,19 @@ class MainWindow(QMainWindow):
         self.content_quality.refresh()
 
     def _on_folders_changed(self) -> None:
-        # Folder list/assignments changed from either the Config screen, the
-        # dashboard's folder button, or the sidebar's context menu — keep all
-        # three views in sync regardless of which one triggered the change.
-        self.side.refresh_folder_dots()
+        # Folder OR tag list/assignments changed, from the Config screen,
+        # the dashboard's folder/tag button, or the sidebar's context menu
+        # — keep every view in sync regardless of which one triggered it
+        # (shared handler since a folder and a tag change both need the
+        # exact same views refreshed).
+        self.side.refresh_badges()
         self.config_view.refresh_folders_list()
+        self.config_view.refresh_tags_list()
         self.folder_stat.refresh()
         self.content_quality.refresh()
         if self._current_key:
             self.dashboard.refresh_folder_button()
+            self.dashboard.refresh_tag_button()
 
     def _fold_sidebar(self) -> None:
         self._sidebar_folded = True

@@ -27,6 +27,7 @@ from ..folders import FolderStore
 from ..media_cache import thumbnail_path
 from ..periods import period_key_label
 from ..scoring import post_gauge_value, post_score_raw, score_tooltip
+from ..tags import TagStore
 from ..tools.media_fetch import run_thumbnail_cache
 from ..worker import ToolWorker
 from .charts import BarChart, MultiLineChart
@@ -162,14 +163,17 @@ class DashboardView(QWidget):
     refetch_requested = Signal(dict)
     remove_requested = Signal(str)
     folders_changed = Signal()
+    tags_changed = Signal()
 
     # table column index -> row-dict key (None = not sortable)
     _SORT_KEYS = {0: "ts", 2: "views", 3: "reactions", 4: "forwards", 5: "public"}
 
-    def __init__(self, i18n, folder_store: FolderStore, cfg: Config, parent=None) -> None:
+    def __init__(self, i18n, folder_store: FolderStore, tag_store: TagStore, cfg: Config,
+                parent=None) -> None:
         super().__init__(parent)
         self.i18n = i18n
         self.folder_store = folder_store
+        self.tag_store = tag_store
         self.cfg = cfg
         self._data: dict = {}
         self._rows: list[dict] = []
@@ -211,6 +215,11 @@ class DashboardView(QWidget):
         head.addLayout(titles)
         head.addStretch()
 
+        self.tag_btn = QPushButton(self.tr_("tag_none"))
+        self.tag_btn.setObjectName("ghost")
+        self.tag_btn.setToolTip(self.tr_("tag_choose"))
+        self.tag_btn.clicked.connect(self._show_tag_menu)
+        head.addWidget(self.tag_btn)
         self.folder_btn = QPushButton(self.tr_("folder_none"))
         self.folder_btn.setObjectName("ghost")
         self.folder_btn.setToolTip(self.tr_("folder_choose"))
@@ -589,6 +598,7 @@ class DashboardView(QWidget):
         self._rebuild_table()
         self._rebuild_top_viral_table()
         self.refresh_folder_button()
+        self.refresh_tag_button()
 
     # -------------------------------------------------------------- folders
     def refresh_folder_button(self) -> None:
@@ -643,6 +653,44 @@ class DashboardView(QWidget):
         dlg.exec()
         self.refresh_folder_button()
         self.folders_changed.emit()
+
+    # ----------------------------------------------------------------- tags
+    def refresh_tag_button(self) -> None:
+        key = self._data.get("key")
+        tag_name = self.tag_store.tag_for_channel(key) if key else None
+        self.tag_btn.setText(tag_name if tag_name else self.tr_("tag_none"))
+
+    def _show_tag_menu(self) -> None:
+        key = self._data.get("key")
+        if not key:
+            return
+        menu = QMenu(self)
+        current = self.tag_store.tag_for_channel(key)
+
+        none_act = menu.addAction(self.tr_("tag_none"))
+        none_act.setCheckable(True)
+        none_act.setChecked(current is None)
+        none_act.triggered.connect(lambda: self._assign_tag(None))
+
+        tags = self.tag_store.list_tags()
+        if tags:
+            menu.addSeparator()
+            for tag in tags:
+                act = menu.addAction(tag["name"])
+                act.setCheckable(True)
+                act.setChecked(tag["name"] == current)
+                act.triggered.connect(
+                    lambda _=False, name=tag["name"]: self._assign_tag(name))
+
+        menu.exec(self.tag_btn.mapToGlobal(self.tag_btn.rect().bottomLeft()))
+
+    def _assign_tag(self, name: str | None) -> None:
+        key = self._data.get("key")
+        if not key:
+            return
+        self.tag_store.set_channel_tag(key, name)
+        self.refresh_tag_button()
+        self.tags_changed.emit()
 
     def _header_sub(self) -> str:
         parts = []
@@ -1128,6 +1176,7 @@ class DashboardView(QWidget):
 
     # ---------------------------------------------------------- translate
     def retranslate(self) -> None:
+        self.tag_btn.setToolTip(self.tr_("tag_choose"))
         self.folder_btn.setToolTip(self.tr_("folder_choose"))
         self.report_btn.setText(self.tr_("report_button"))
         self.md_btn.setText(self.tr_("save_md_button"))
@@ -1178,3 +1227,4 @@ class DashboardView(QWidget):
             self.sub_lbl.setText(self._header_sub())
             self._rebuild_recent_posts()  # tooltips embed translated text
         self.refresh_folder_button()
+        self.refresh_tag_button()

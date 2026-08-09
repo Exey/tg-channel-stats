@@ -14,12 +14,17 @@ from PySide6.QtWidgets import (
 )
 
 from ..folders import FolderStore
+from ..tags import TagStore
+from ..text_utils import consonant_abbreviation
 from ..version import __version__
 from .compare_view import MAX_COMPARE
 from .dashboard_view import short_num
 from .folder_dialog import FolderManagerDialog
 from .theme import COLORS
 from .widgets import NavButton, folder_icon, hline
+
+_FOLDER_BADGE_LEN = 2
+_TAG_BADGE_LEN = 3
 
 
 class SidePanel(QFrame):
@@ -34,8 +39,10 @@ class SidePanel(QFrame):
     fold_requested = Signal()
     language_toggle_requested = Signal()
     folders_changed = Signal()
+    tags_changed = Signal()
 
-    def __init__(self, i18n, folder_store: FolderStore, parent=None) -> None:
+    def __init__(self, i18n, folder_store: FolderStore, tag_store: TagStore,
+                parent=None) -> None:
         super().__init__(parent)
         self.i18n = i18n
         self.setObjectName("sidebar")
@@ -49,6 +56,7 @@ class SidePanel(QFrame):
         self._selected_keys: list[str] = []
         self._switching_modes = False
         self.folder_store = folder_store
+        self.tag_store = tag_store
         self.sort_by_folder = False
         self._last_channels: list[dict] = []
 
@@ -230,12 +238,16 @@ class SidePanel(QFrame):
         else:
             channels = sorted(channels, key=lambda c: c.get("members", 0) or 0, reverse=True)
 
-        # Drop folder assignments for channels that no longer exist (removed
-        # from the sidebar) so folders.json doesn't accumulate dead keys.
+        # Drop folder/tag assignments for channels that no longer exist
+        # (removed from the sidebar) so folders.json/tags.json don't
+        # accumulate dead keys.
         live_keys = {ch["key"] for ch in channels}
         stale = [k for k in self.folder_store.assignments if k not in live_keys]
         for k in stale:
             self.folder_store.set_channel_folder(k, None)
+        stale_tags = [k for k in self.tag_store.assignments if k not in live_keys]
+        for k in stale_tags:
+            self.tag_store.set_channel_tag(k, None)
 
         self._selected_keys.clear()
         for ch in channels:
@@ -255,7 +267,7 @@ class SidePanel(QFrame):
             self.list_lay.insertWidget(self.list_lay.count() - 1, btn)
             self._channel_btns[key] = btn
         self.group.setExclusive(not (self.compare_mode or self.compare_charts_mode))
-        self.refresh_folder_dots()
+        self.refresh_badges()
 
     def _on_sort_folders_toggled(self, on: bool) -> None:
         self.sort_by_folder = on
@@ -269,21 +281,34 @@ class SidePanel(QFrame):
         key = "nav_sort_folders_active" if self.sort_by_folder else "nav_sort_folders"
         self.sort_folders_btn.setText(self.i18n.tr(key))
 
-    # -------------------------------------------------------------- folders
-    def refresh_folder_dots(self) -> None:
+    # --------------------------------------------------------- folders/tags
+    def refresh_badges(self) -> None:
+        """Left-of-label badge per channel: a tag's 3-consonant abbreviation
+        if one is assigned (falling back to the channel's folder color, or
+        muted if it's not in a folder either), else a folder's 2-consonant
+        abbreviation if it's at least in one, else the plain default icon.
+        Tags don't carry their own color — see app.tags module docstring."""
         for key, btn in self._channel_btns.items():
             folder_id = self.folder_store.folder_for_channel(key)
             folder = self.folder_store.get_folder(folder_id) if folder_id else None
-            btn.set_folder_color(folder["color"] if folder else None,
-                                 folder["name"] if folder else None)
+            tag_name = self.tag_store.tag_for_channel(key)
+            if tag_name and self.tag_store.has_tag(tag_name):
+                color = folder["color"] if folder else COLORS["muted"]
+                tooltip = f"{tag_name} · {folder['name']}" if folder else tag_name
+                btn.set_badge(consonant_abbreviation(tag_name, _TAG_BADGE_LEN), color, tooltip)
+            elif folder:
+                btn.set_badge(consonant_abbreviation(folder["name"], _FOLDER_BADGE_LEN),
+                             folder["color"], folder["name"])
+            else:
+                btn.clear_badge()
 
     def _show_channel_menu(self, key: str, btn: NavButton, pos) -> None:
         menu = QMenu(self)
-        current = self.folder_store.folder_for_channel(key)
+        current_folder = self.folder_store.folder_for_channel(key)
 
         none_act = menu.addAction(self.i18n.tr("folder_none"))
         none_act.setCheckable(True)
-        none_act.setChecked(current is None)
+        none_act.setChecked(current_folder is None)
         none_act.triggered.connect(lambda: self._assign_folder(key, None))
 
         folders = self.folder_store.list_folders()
@@ -292,7 +317,7 @@ class SidePanel(QFrame):
             for folder in folders:
                 act = menu.addAction(folder_icon(folder["color"]), folder["name"])
                 act.setCheckable(True)
-                act.setChecked(folder["id"] == current)
+                act.setChecked(folder["id"] == current_folder)
                 act.triggered.connect(
                     lambda _=False, fid=folder["id"]: self._assign_folder(key, fid))
 
@@ -300,18 +325,42 @@ class SidePanel(QFrame):
         manage_act = menu.addAction(self.i18n.tr("folder_manage"))
         manage_act.triggered.connect(self._open_folder_manager)
 
+        # Tags are a second, independent single-choice assignment — own
+        # section, same None/list shape as folders above minus "Manage"
+        # (tags are only ever defined by loading a Markdown file, see
+        # ConfigView's Tags card).
+        tags = self.tag_store.list_tags()
+        if tags:
+            menu.addSeparator()
+            current_tag = self.tag_store.tag_for_channel(key)
+            tag_none_act = menu.addAction(self.i18n.tr("tag_none"))
+            tag_none_act.setCheckable(True)
+            tag_none_act.setChecked(current_tag is None)
+            tag_none_act.triggered.connect(lambda: self._assign_tag(key, None))
+            for tag in tags:
+                act = menu.addAction(tag["name"])
+                act.setCheckable(True)
+                act.setChecked(tag["name"] == current_tag)
+                act.triggered.connect(
+                    lambda _=False, name=tag["name"]: self._assign_tag(key, name))
+
         menu.exec(btn.mapToGlobal(pos))
 
     def _assign_folder(self, key: str, folder_id: str | None) -> None:
         self.folder_store.set_channel_folder(key, folder_id)
-        self.refresh_folder_dots()
+        self.refresh_badges()
         self.folders_changed.emit()
 
     def _open_folder_manager(self) -> None:
         dlg = FolderManagerDialog(self.folder_store, self.i18n, self)
         dlg.exec()
-        self.refresh_folder_dots()
+        self.refresh_badges()
         self.folders_changed.emit()
+
+    def _assign_tag(self, key: str, name: str | None) -> None:
+        self.tag_store.set_channel_tag(key, name)
+        self.refresh_badges()
+        self.tags_changed.emit()
 
     # ------------------------------------------------------------- compare
     def _sync_checked_buttons(self, keys: list[str]) -> None:

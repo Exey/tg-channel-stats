@@ -63,6 +63,25 @@ EN = {
                                  "folder they're currently assigned to.",
     "folder_assign_all_none": "No channels to assign yet — fetch one from "
                               "this screen first.",
+    "folder_export_col_tag": "Tag",
+    # tags (Config screen's Tags card, sidebar badges, dashboard's tag button)
+    "tag_section_title": "Tags",
+    "tag_manage_help": "Load a Markdown table (| tag | long tag | description "
+                       "|) to define the available tags. Editing tags.md and "
+                       "loading it again replaces the whole list — assign a "
+                       "tag to a channel from the sidebar's right-click menu "
+                       "or the dashboard's tag button.",
+    "tag_list_empty": "No tags loaded yet.",
+    "tag_load_md_btn": "Load MD",
+    "tag_load_md_hint": "Pick a Markdown file shaped like "
+                        "\"| tag | long tag | description |\" — replaces "
+                        "the current tag list; channels assigned to a "
+                        "removed tag become untagged.",
+    "tag_load_md_done": "Loaded {n} tags.",
+    "tag_load_md_empty": "No tags found in that file — check it matches "
+                         "the \"| tag | long tag | description |\" format.",
+    "tag_none": "No tag",
+    "tag_choose": "Assign this channel to a tag",
     # folder stat view
     "nav_folder_stat": "📁 Folder Stats",
     "folder_stat_sub": "Cross-channel links and periodic stats for one folder",
@@ -390,6 +409,27 @@ RU = {
                                  "они сейчас находятся.",
     "folder_assign_all_none": "Пока нет каналов для назначения — сначала "
                               "загрузите канал на этом экране.",
+    "folder_export_col_tag": "Тег",
+    # tags (карточка «Теги» на экране настроек, значки в боковой панели,
+    # кнопка тега в дашборде)
+    "tag_section_title": "Теги",
+    "tag_manage_help": "Загрузите таблицу Markdown (| tag | long tag | "
+                       "description |), чтобы задать доступные теги. "
+                       "Изменение tags.md и повторная загрузка заменяют "
+                       "весь список — назначить тег каналу можно из "
+                       "контекстного меню в боковой панели или кнопкой "
+                       "тега в дашборде.",
+    "tag_list_empty": "Пока нет загруженных тегов.",
+    "tag_load_md_btn": "Загрузить MD",
+    "tag_load_md_hint": "Выберите файл Markdown в формате "
+                        "«| tag | long tag | description |» — заменяет "
+                        "текущий список тегов; каналы с удалённым тегом "
+                        "останутся без тега.",
+    "tag_load_md_done": "Загружено тегов: {n}.",
+    "tag_load_md_empty": "В этом файле не найдено тегов — проверьте формат "
+                         "«| tag | long tag | description |».",
+    "tag_none": "Без тега",
+    "tag_choose": "Назначить этому каналу тег",
     # folder stat view
     "nav_folder_stat": "📁 Статистика папки",
     "folder_stat_sub": "Связи между каналами и статистика по периодам для одной папки",
