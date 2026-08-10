@@ -22,6 +22,7 @@ from PySide6.QtWidgets import (
 from ..config import CONN_FIELDS, config_dir
 from ..folders import FolderStore
 from ..periods import period_key_label
+from ..rating import score_entries
 from ..scoring import post_gauge_value, post_score_raw
 from ..store import ChannelStore
 from ..tags import TagStore
@@ -30,7 +31,6 @@ from ..tools.comments_refresh import run_comments_refresh
 from ..worker import CheckLoginWorker, ToolWorker
 from .dashboard_view import fmt_int
 from .folder_dialog import FolderManagerDialog
-from .folder_stat_view import FolderStatView
 from .qr_login_dialog import QrLoginDialog
 from .widgets import Card, SectionCard
 
@@ -489,10 +489,9 @@ class ConfigView(QWidget):
         sidebar's "Sort Fols" toggle (see FolderStore.sorted_by_folder) —
         folder list order, unassigned channels last, followers descending
         within each group. Rating/Views/Viral share (see
-        folders_export_extra_chk) reuse FolderStatView._score_entries so
-        they come out numerically identical to what Folder Stats itself
-        would show for the same folder/period — see
-        _collect_export_metrics."""
+        folders_export_extra_chk) reuse app.rating.score_entries so they
+        come out numerically identical to what Folder Stats itself would
+        show for the same folder/period — see _collect_export_metrics."""
         summaries = self.folder_store.sorted_by_folder(self.channel_store.list())
         folder_name = {f["id"]: f["name"] for f in self.folder_store.list_folders()}
         extra = self.folders_export_extra_chk.isChecked()
@@ -520,7 +519,9 @@ class ConfigView(QWidget):
                 # No public username to link to — a title snippet reads
                 # better in the exported table than the bare checkpoint
                 # key, with the id still there in parens for a lookup.
-                title = ch.get("title") or ch["key"]
+                # "|" would otherwise be read as a column separator and
+                # break the row, so it's stripped rather than escaped.
+                title = (ch.get("title") or ch["key"]).replace("|", "")
                 ident = f"{title[:18]}({ch['key']})"
             tag = self.tag_store.tag_for_channel(ch["key"]) or ""
             row = [folder, fmt_int(ch.get("members", 0)), ident, tag]
@@ -541,8 +542,8 @@ class ConfigView(QWidget):
         exactly like FolderStatView's Periodic Stats: entries are grouped by folder
         (channels with no folder form their own group) and normalized
         against only their own group's peers for the same period, via
-        FolderStatView._score_entries — that's what makes a channel's
-        Rating here match what Folder Stats itself would show, unlike a
+        app.rating.score_entries — that's what makes a channel's Rating
+        here match what Folder Stats itself would show, unlike a
         channel-global metric which couldn't reproduce that per-folder
         normalization at all."""
         groups: dict[str | None, list[str]] = {}
@@ -561,7 +562,7 @@ class ConfigView(QWidget):
                 entries.append({"key": key, **totals})
             if not entries:
                 continue
-            FolderStatView._score_entries(entries)
+            score_entries(entries)
             for e in entries:
                 out[e["key"]] = (e["score"], e["views"], e["viral_share"], e["quality"])
         return out

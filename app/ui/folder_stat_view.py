@@ -33,6 +33,7 @@ from ..folders import FolderStore
 from ..periods import (
     YEAR_WINDOW_OPTIONS, period_key_label as _period_key_label, year_window_cutoff,
 )
+from ..rating import score_entries
 from ..scoring import post_gauge_value, post_score_raw
 from ..store import ChannelStore
 from .dashboard_view import build_post_link, fmt_int
@@ -76,6 +77,15 @@ def _channel_avg_views(ch: dict) -> float:
     return float(ch.get("stats", {}).get("avg_views", 0) or 0)
 
 
+def _last_ended_half_year_key() -> tuple:
+    """(year, half) for the most recent calendar half-year that has fully
+    ended as of today — e.g. August 2026 is in H2 2026, which hasn't ended
+    yet, so this returns (2026, 1); January-June of any year instead falls
+    back to H2 of the *previous* year."""
+    now = datetime.now()
+    return (now.year - 1, 2) if now.month <= 6 else (now.year, 1)
+
+
 class FolderStatView(QWidget):
     # period_table column index -> sortable (Most viewed post isn't).
     _PERIOD_SORTABLE_COLS = {0, 1, 2, 3, 4, 6, 7, 8}
@@ -88,13 +98,13 @@ class FolderStatView(QWidget):
         self.channel_store = channel_store
         self._channels: list[dict] = []
         self._periods: dict[tuple, dict] = {}
-        self._period_mode = "season"
+        self._period_mode = "halfyear"
         self._selected_period_key: tuple | None = None
         self._period_btns: dict[tuple, QPushButton] = {}
         self._year_window_key = "all"
         self._year_btns: dict[str, QPushButton] = {}
         self._period_entries: list[dict] = []
-        self._period_sort_col = 6   # Viral share, matching the previous fixed order
+        self._period_sort_col = 7   # Rating
         self._period_sort_desc = True
         self._build_ui()
 
@@ -259,6 +269,10 @@ class FolderStatView(QWidget):
         period_header.setSectionResizeMode(5, QHeaderView.ResizeMode.Stretch)
         period_header.setSectionsClickable(True)
         period_header.sectionClicked.connect(self._on_period_header_clicked)
+        # Title and Username/ID commonly overflow Qt's default column width —
+        # give them 33% more room than that default up front.
+        for col in (0, 1):
+            self.period_table.setColumnWidth(col, int(self.period_table.columnWidth(col) * 1.33))
         self.period_table.cellDoubleClicked.connect(self._open_period_post)
         self.period_table.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         # No internal scrollbar: the table grows to fit every row (see
@@ -274,11 +288,11 @@ class FolderStatView(QWidget):
             lambda checked: self._on_mode_toggled("halfyear", checked))
         self.mode_month_btn.toggled.connect(lambda checked: self._on_mode_toggled("month", checked))
         self.mode_year_btn.toggled.connect(lambda checked: self._on_mode_toggled("year", checked))
-        self.mode_season_btn.setChecked(True)
+        self.mode_halfyear_btn.setChecked(True)
 
         mode_row = QHBoxLayout()
-        mode_row.addWidget(self.mode_season_btn)
         mode_row.addWidget(self.mode_halfyear_btn)
+        mode_row.addWidget(self.mode_season_btn)
         mode_row.addWidget(self.mode_month_btn)
         mode_row.addWidget(self.mode_year_btn)
         mode_row.addStretch()
@@ -457,75 +471,8 @@ class FolderStatView(QWidget):
                     "quality": (sum(scores) / len(scores)) if scores else 0,
                 })
         for bucket in periods.values():
-            self._score_entries(bucket["entries"])
+            score_entries(bucket["entries"])
         return periods
-
-    _VIRALITY_WEIGHT_MIN = 0.20
-    _VIRALITY_WEIGHT_MAX = 0.51
-    _ENGAGEMENT_WEIGHT = 0.20
-    _QUALITY_WEIGHT = 0.25
-
-    @staticmethod
-    def _virality_component(viral_share: float) -> float:
-        """0-1 virality score from an *absolute* viral-share percentage (not
-        normalized against other channels): 0% -> 0, 1% -> 0.05, ramping up
-        to 1.0 at 15%+ viral share."""
-        if viral_share <= 0:
-            return 0.0
-        if viral_share >= 15:
-            return 1.0
-        if viral_share <= 1:
-            return 0.05 * viral_share
-        return 0.05 + (viral_share - 1) * (1.0 - 0.05) / (15 - 1)
-
-    @staticmethod
-    def _virality_weight(viral_share: float) -> float:
-        """How much of the rating virality can swing, itself scaled by how
-        viral the channel is: 20% at 0% viral share, ramping linearly to
-        51% at 15%+ viral share — so a highly viral channel isn't just
-        scored well on virality, virality also matters more to its rating."""
-        lo, hi = FolderStatView._VIRALITY_WEIGHT_MIN, FolderStatView._VIRALITY_WEIGHT_MAX
-        if viral_share <= 0:
-            return lo
-        if viral_share >= 15:
-            return hi
-        return lo + (viral_share / 15) * (hi - lo)
-
-    @staticmethod
-    def _score_entries(entries: list[dict]) -> None:
-        """Composite 0-1 rating per entry: a fixed 20% engagement, a fixed
-        25% Post Quality (see `_collect_periods`' `quality`), a virality
-        weight that itself ramps from 20% to 51% with viral share (see
-        `_virality_weight`) applied to the virality score (see
-        `_virality_component`), and period views taking whatever weight is
-        left (55% - virality weight) — so views weight shrinks as virality
-        weight grows. Engagement, Post Quality and views are min-max
-        normalized against the other channels in the same period bucket;
-        virality uses an absolute viral-share curve so it doesn't get
-        diluted by how other channels in the folder performed.
-        """
-        if not entries:
-            return
-        views_vals = [e["views"] for e in entries]
-        eng_vals = [e["shares"] + e["reactions"] for e in entries]
-        quality_vals = [e["quality"] for e in entries]
-        vw_min, vw_max = min(views_vals), max(views_vals)
-        eg_min, eg_max = min(eng_vals), max(eng_vals)
-        qa_min, qa_max = min(quality_vals), max(quality_vals)
-        for e in entries:
-            views_norm = (e["views"] - vw_min) / (vw_max - vw_min) if vw_max != vw_min else 0
-            eng = e["shares"] + e["reactions"]
-            eng_norm = (eng - eg_min) / (eg_max - eg_min) if eg_max != eg_min else 0
-            quality_norm = ((e["quality"] - qa_min) / (qa_max - qa_min)
-                            if qa_max != qa_min else 0)
-            viral_score = FolderStatView._virality_component(e["viral_share"])
-            virality_weight = FolderStatView._virality_weight(e["viral_share"])
-            views_weight = (1.0 - FolderStatView._ENGAGEMENT_WEIGHT
-                            - FolderStatView._QUALITY_WEIGHT) - virality_weight
-            e["score"] = (FolderStatView._ENGAGEMENT_WEIGHT * eng_norm
-                         + FolderStatView._QUALITY_WEIGHT * quality_norm
-                         + virality_weight * viral_score
-                         + views_weight * views_norm)
 
     def _collect_all_period_keys(self, mode: str) -> list[tuple[tuple, str]]:
         """Every period key/label across *all* tracked channels, regardless of
@@ -696,8 +643,18 @@ class FolderStatView(QWidget):
             self._build_month_picker(keys_labels)
 
         if keys_labels:
-            target = (self._selected_period_key if self._selected_period_key in self._period_btns
-                      else keys_labels[0][0])
+            if self._selected_period_key in self._period_btns:
+                target = self._selected_period_key
+            elif self._period_mode == "halfyear" and _last_ended_half_year_key() in self._period_btns:
+                # Default to the last half-year that's actually *over* (e.g.
+                # August 2026 defaults to 2026 H1, not the still-in-progress
+                # H2) rather than just whichever bucket happens to be
+                # newest — a channel with a stray early post in the current,
+                # unfinished half would otherwise make that partial half the
+                # default.
+                target = _last_ended_half_year_key()
+            else:
+                target = keys_labels[0][0]
             self._period_btns[target].setChecked(True)
         else:
             self._selected_period_key = None
@@ -764,13 +721,15 @@ class FolderStatView(QWidget):
             if top_row is None:
                 post_item = QTableWidgetItem("—")
             else:
+                # Full text, not chopped to a fixed character count — the
+                # column stretches to fill whatever space is available, so a
+                # fixed cutoff was cutting text short of what the cell could
+                # actually show; Qt already elides whatever doesn't fit.
                 snippet = (top_row.get("text") or f"#{top_row.get('id')}").strip()
-                if len(snippet) > 60:
-                    snippet = snippet[:59] + "…"
                 link = build_post_link(ch.get("channel") or ch.get("username") or "",
                                        top_row.get("id", 0))
                 post_item = QTableWidgetItem(snippet or f"#{top_row.get('id')}")
-                post_item.setToolTip(link)
+                post_item.setToolTip(f"{snippet}\n{link}" if snippet else link)
                 post_item.setData(Qt.ItemDataRole.UserRole, link)
             self.period_table.setItem(i, 5, post_item)
 
