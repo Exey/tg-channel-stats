@@ -47,12 +47,14 @@ EN = {
     "folder_export_col_folder": "Folder",
     "folder_export_col_followers": "Followers",
     "folder_export_col_id": "ID/Username",
-    "folder_export_extra_cols": "Rating, views, viral share",
-    "folder_export_extra_cols_hint": "Add Rating (average post quality "
-                                     "gauge), Views (average views per "
-                                     "post) and Viral share columns — "
-                                     "reads every channel's full checkpoint, "
-                                     "not just the sidebar summary.",
+    "folder_export_extra_cols": "Rating, views, viral share, post quality",
+    "folder_export_extra_cols_hint": "Add Rating (composite score, same "
+                                     "formula as Folder Stats), Views "
+                                     "(total for the period), Viral share "
+                                     "and Post Quality (average gauge "
+                                     "score) columns — reads every "
+                                     "channel's full checkpoint, not just "
+                                     "the sidebar summary.",
     "folder_export_period_hint": "Which period Rating/Views/Viral share are "
                                  "computed over — the channel's most recent "
                                  "half-year or season, or its whole "
@@ -128,8 +130,7 @@ EN = {
     "col_most_viewed": "Most viewed post",
     "col_viral_share": "Viral share",
     "col_rating": "Rating",
-    "col_name": "Name",
-    "col_website": "Website",
+    "col_post_quality": "Post Quality",
     "folder_stat_period_empty": "No posts found for this folder.",
     # high-quality posts view
     "nav_content_quality": "🎯 High-Quality Posts",
@@ -404,11 +405,13 @@ RU = {
     "folder_export_col_folder": "Папка",
     "folder_export_col_followers": "Подписчики",
     "folder_export_col_id": "ID/Юзернейм",
-    "folder_export_extra_cols": "Рейтинг, просмотры, доля виральных",
-    "folder_export_extra_cols_hint": "Добавить колонки Рейтинг (средний "
-                                     "балл качества постов), Просмотры "
-                                     "(среднее число просмотров на пост) и "
-                                     "Доля виральных — читает полный "
+    "folder_export_extra_cols": "Рейтинг, просмотры, доля виральных, "
+                                "качество постов",
+    "folder_export_extra_cols_hint": "Добавить колонки Рейтинг (составной "
+                                     "балл, формула как в Статистике "
+                                     "папки), Просмотры (сумма за период), "
+                                     "Доля виральных и Качество постов "
+                                     "(средний балл) — читает полный "
                                      "чекпоинт каждого канала, а не только "
                                      "сводку из боковой панели.",
     "folder_export_period_hint": "За какой период считать Рейтинг/"
@@ -489,8 +492,7 @@ RU = {
     "col_most_viewed": "Самый популярный пост",
     "col_viral_share": "Доля виральных",
     "col_rating": "Рейтинг",
-    "col_name": "Имя",
-    "col_website": "Сайт",
+    "col_post_quality": "Качество постов",
     "folder_stat_period_empty": "Постов в этой папке не найдено.",
     # high-quality posts view
     "nav_content_quality": "🎯 Лучшие посты",
