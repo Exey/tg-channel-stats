@@ -36,12 +36,13 @@ and 0 comments until refetched.
 """
 from __future__ import annotations
 
-from datetime import datetime
+import base64
+from datetime import datetime, timezone
 
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QFont, QFontMetrics, QPixmap
 from PySide6.QtWidgets import (
-    QButtonGroup, QCheckBox, QComboBox, QFrame, QGridLayout, QHBoxLayout,
+    QButtonGroup, QCheckBox, QComboBox, QFileDialog, QFrame, QGridLayout, QHBoxLayout,
     QLabel, QMessageBox, QPushButton, QScrollArea, QVBoxLayout, QWidget,
 )
 
@@ -58,7 +59,7 @@ from .widgets import (
     PostCard, POST_CARD_HEIGHT as CARD_HEIGHT, POST_CARD_PLACEHOLDERS as _MEDIA_PLACEHOLDERS,
     POST_CARD_TEXT_LINES as _TEXT_LINES, POST_CARD_TEXT_PIXEL_SIZE as _TEXT_PIXEL_SIZE,
     POST_CARD_TEXT_WIDTH as _TEXT_WIDTH, POST_CARD_THUMB_HEIGHT as _THUMB_HEIGHT,
-    POST_CARD_WIDTH as CARD_WIDTH, elide_to_lines as _elide_to_lines,
+    POST_CARD_WIDTH as CARD_WIDTH, elide_to_lines as _elide_to_lines, format_media_counts,
 )
 
 _GRID_SPACING = 14
@@ -66,6 +67,8 @@ _PAGE_MARGIN_LEFT = 34
 _PAGE_MARGIN_RIGHT = 40
 MAX_POSTS_SHOWN = 80   # keeps a big folder/period from being an unbounded grid
 TOP_AUTHORS_SHOWN = 5   # "Best N authors" summary at the top of the Tg Links export
+FOLDER_HITMAKERS_SHOWN = 10   # "Top 10 {folder} hitmakers" per folder in the MD export
+_EXPORT_MD_TEXT_LEN = 160
 _TG_LINKS_SNIPPET_LEN = 12
 MONTHS_FULL = ["", "January", "February", "March", "April", "May", "June",
                "July", "August", "September", "October", "November", "December"]
@@ -176,12 +179,22 @@ class ContentQualityView(QWidget):
         self.tg_links_btn.setToolTip(self.tr_("cqi_tg_links_hint"))
         self.tg_links_btn.clicked.connect(self._on_tg_links_clicked)
         header.addWidget(self.tg_links_btn)
+        # A richer export than Tg Links: one row per post with its cached
+        # thumbnail embedded as a base64 data: URI — see
+        # _build_export_md_table. Saves straight to a file (like every
+        # other "MD" button in the app) instead of the Tg Links button's
+        # copy-from-a-dialog flow, since a table full of embedded images is
+        # far too large to usefully preview in a plain-text dialog.
+        self.export_md_btn = QPushButton(self.tr_("cqi_export_md_btn"))
+        self.export_md_btn.setToolTip(self.tr_("cqi_export_md_hint"))
+        self.export_md_btn.clicked.connect(self._on_export_md_clicked)
+        header.addWidget(self.export_md_btn)
         # How many top posts to keep overall — the same cap the grid, the
         # per-channel limit and the Tg Links list all share (see
         # _channel_limited_entries).
         self.max_posts_combo = QComboBox()
         self.max_posts_combo.setToolTip(self.tr_("cqi_max_posts_hint"))
-        for n in (25, 40, 50, 60, 70, 80):
+        for n in (25, 50, 60, 80, 100, 150, 200, 250):
             self.max_posts_combo.addItem(self.tr_("cqi_max_posts_n", n=n), n)
         self.max_posts_combo.setCurrentIndex(self.max_posts_combo.findData(MAX_POSTS_SHOWN))
         header.addWidget(self.max_posts_combo)
@@ -219,6 +232,9 @@ class ContentQualityView(QWidget):
         # One row: period mode on the left, folder picker on the right —
         # they're unrelated controls but both narrow, so sharing a row
         # keeps the header more compact than stacking each on its own line.
+        self.mode_halfyear_btn = QPushButton(self.tr_("period_mode_halfyear"))
+        self.mode_halfyear_btn.setObjectName("ghost")
+        self.mode_halfyear_btn.setCheckable(True)
         self.mode_season_btn = QPushButton(self.tr_("period_mode_season"))
         self.mode_season_btn.setObjectName("ghost")
         self.mode_season_btn.setCheckable(True)
@@ -230,10 +246,12 @@ class ContentQualityView(QWidget):
         self.mode_year_btn.setCheckable(True)
         self._mode_btn_group = QButtonGroup(self)
         self._mode_btn_group.setExclusive(True)
+        self._mode_btn_group.addButton(self.mode_halfyear_btn)
         self._mode_btn_group.addButton(self.mode_season_btn)
         self._mode_btn_group.addButton(self.mode_month_btn)
         self._mode_btn_group.addButton(self.mode_year_btn)
         mode_row = QHBoxLayout()
+        mode_row.addWidget(self.mode_halfyear_btn)
         mode_row.addWidget(self.mode_season_btn)
         mode_row.addWidget(self.mode_month_btn)
         mode_row.addWidget(self.mode_year_btn)
@@ -253,11 +271,6 @@ class ContentQualityView(QWidget):
         self.picker_lay.setSpacing(8)
         page.addWidget(self.picker_container)
         page.addSpacing(6)
-
-        self.no_folders_lbl = QLabel(self.tr_("folder_stat_no_folders"))
-        self.no_folders_lbl.setObjectName("navEmpty")
-        self.no_folders_lbl.setWordWrap(True)
-        page.addWidget(self.no_folders_lbl)
 
         self.empty_channels_lbl = QLabel(self.tr_("folder_stat_empty_channels"))
         self.empty_channels_lbl.setObjectName("navEmpty")
@@ -288,6 +301,7 @@ class ContentQualityView(QWidget):
 
         # Widgets above exist now, so it's safe to wire signals and set the
         # default mode (which fires the toggle once).
+        self.mode_halfyear_btn.toggled.connect(lambda c: self._on_mode_toggled("halfyear", c))
         self.mode_season_btn.toggled.connect(lambda c: self._on_mode_toggled("season", c))
         self.mode_month_btn.toggled.connect(lambda c: self._on_mode_toggled("month", c))
         self.mode_year_btn.toggled.connect(lambda c: self._on_mode_toggled("year", c))
@@ -311,17 +325,19 @@ class ContentQualityView(QWidget):
         self._relayout_grid()
 
     # --------------------------------------------------------------- data
+    _ALL_FOLDERS = "__all__"
+
     def refresh(self) -> None:
         """Reload folders + this folder's channels from disk. Call whenever
         the view is shown, or folders/channels changed elsewhere."""
         current_id = self.folder_combo.currentData()
         self.folder_combo.blockSignals(True)
         self.folder_combo.clear()
+        self.folder_combo.addItem(self.tr_("cqi_all_folders"), self._ALL_FOLDERS)
         for folder in self.folder_store.list_folders():
             self.folder_combo.addItem(folder["name"], folder["id"])
-        if self.folder_combo.count():
-            idx = self.folder_combo.findData(current_id) if current_id else -1
-            self.folder_combo.setCurrentIndex(idx if idx >= 0 else 0)
+        idx = self.folder_combo.findData(current_id) if current_id else -1
+        self.folder_combo.setCurrentIndex(idx if idx >= 0 else 0)
         self.folder_combo.blockSignals(False)
         self._reload_channels()
 
@@ -331,20 +347,23 @@ class ContentQualityView(QWidget):
     def _reload_channels(self) -> None:
         folder_id = self.folder_combo.currentData()
         self._channels = []
-        if folder_id:
+        if folder_id == self._ALL_FOLDERS:
+            keys = [s["key"] for s in self.channel_store.list()]
+        elif folder_id:
             keys = [k for k, fid in self.folder_store.assignments.items() if fid == folder_id]
-            for key in keys:
-                data = self.channel_store.load(key)
-                if data:
-                    data.setdefault("key", key)
-                    self._channels.append(data)
+        else:
+            keys = []
+        for key in keys:
+            data = self.channel_store.load(key)
+            if data:
+                data.setdefault("key", key)
+                self._channels.append(data)
 
-        has_folders = self.folder_combo.count() > 0
-        has_channels = bool(self._channels)
-        self.no_folders_lbl.setVisible(not has_folders)
-        self.pick_lbl.setVisible(has_folders)
-        self.folder_combo.setVisible(has_folders)
-        self.empty_channels_lbl.setVisible(has_folders and not has_channels)
+        # The combo always has at least "All folders", so there's no
+        # "create a folder first" empty state to show anymore — only
+        # whether the selected scope (a folder, or all of them) actually
+        # has any channels in it.
+        self.empty_channels_lbl.setVisible(not self._channels)
 
         self._rebuild_period_picker()
 
@@ -437,10 +456,30 @@ class ContentQualityView(QWidget):
         return None
 
     def _year_window_label(self) -> str:
+        if isinstance(self._year_window_key, int):
+            return str(self._year_window_key)
         for key, label_key, _days in YEAR_WINDOW_OPTIONS:
             if key == self._year_window_key:
                 return self.tr_(label_key)
         return ""
+
+    def _collect_calendar_years(self) -> list[int]:
+        """Every calendar year with at least one post, across *all* tracked
+        channels regardless of folder — same stability rule as
+        _collect_all_period_keys, newest first."""
+        years: set[int] = set()
+        for summary in self.channel_store.list():
+            data = self.channel_store.load(summary["key"])
+            if not data:
+                continue
+            for m in data.get("distributions", {}).get("monthly") or []:
+                if not int(m.get("count", 0) or 0):
+                    continue
+                try:
+                    years.add(int(m.get("label", "").split("-")[0]))
+                except (ValueError, IndexError):
+                    continue
+        return sorted(years, reverse=True)
 
     def _build_year_picker(self) -> None:
         row_widget = QWidget()
@@ -459,6 +498,20 @@ class ContentQualityView(QWidget):
             btn.toggled.connect(lambda checked, k=key: self._on_year_window_toggled(k, checked))
             self._year_btns[key] = btn
             row_lay.addWidget(btn)
+        # Calendar years (1 Jan - 31 Dec), newest first — distinct from the
+        # rolling windows above: those are relative to today, these are a
+        # fixed calendar year regardless of when you're looking. Int keys
+        # (vs. the windows' string keys) is what lets _year_window_label/
+        # _collect_posts tell the two kinds apart.
+        for year in self._collect_calendar_years():
+            btn = QPushButton(str(year))
+            btn.setObjectName("ghost")
+            btn.setCheckable(True)
+            btn.setCursor(Qt.CursorShape.PointingHandCursor)
+            self._year_btn_group.addButton(btn)
+            btn.toggled.connect(lambda checked, k=year: self._on_year_window_toggled(k, checked))
+            self._year_btns[year] = btn
+            row_lay.addWidget(btn)
         row_lay.addStretch()
 
         scroll = QScrollArea()
@@ -470,7 +523,7 @@ class ContentQualityView(QWidget):
         self.picker_lay.addWidget(scroll)
         self._year_btns[self._year_window_key].setChecked(True)
 
-    def _on_year_window_toggled(self, key: str, checked: bool) -> None:
+    def _on_year_window_toggled(self, key: str | int, checked: bool) -> None:
         if not checked:
             return
         self._year_window_key = key
@@ -509,7 +562,10 @@ class ContentQualityView(QWidget):
             return
 
         keys_labels = self._collect_all_period_keys(self._period_mode)
-        if self._period_mode == "season":
+        if self._period_mode in ("season", "halfyear"):
+            # Both are a flat, single-scroll row of buttons (one per
+            # period key) — the season picker's builder works unchanged
+            # for half-years too, unlike the month picker's per-year grid.
             self._build_season_picker(keys_labels)
         else:
             self._build_month_picker(keys_labels)
@@ -543,13 +599,25 @@ class ContentQualityView(QWidget):
         of the quota from."""
         mode = self._period_mode
         target_key = self._selected_period_key
-        cutoff = year_window_cutoff(self._year_window_days()) if mode == "year" else None
+        cutoff = None
+        upper = None
+        if mode == "year":
+            if isinstance(self._year_window_key, int):
+                # A specific calendar year (1 Jan - 31 Dec), not a rolling
+                # window from today — needs an upper bound too, unlike the
+                # windows below which always run through the present.
+                cutoff = datetime(self._year_window_key, 1, 1, tzinfo=timezone.utc)
+                upper = datetime(self._year_window_key + 1, 1, 1, tzinfo=timezone.utc)
+            else:
+                cutoff = year_window_cutoff(self._year_window_days())
         posts: list[dict] = []
         for ch in self._channels:
             for row in ch.get("rows", []) or []:
                 if mode == "year":
                     dt = _parse_date(row.get("date", ""))
                     if dt is None or (cutoff is not None and dt < cutoff):
+                        continue
+                    if upper is not None and dt >= upper:
                         continue
                 else:
                     dt = _parse_date(row.get("date", ""))
@@ -790,6 +858,105 @@ class ContentQualityView(QWidget):
         ChannelReportDialog(self, self.i18n, self._build_tg_links_text(),
                             title=self.tr_("cqi_tg_links_dialog_title")).exec()
 
+    def _build_hitmakers_section(self, entries: list[dict]) -> list[str]:
+        """"Top 10 {folder} hitmakers" per folder — channels ranked by how
+        many of `entries` are theirs, one section per folder that actually
+        has posts in scope (folder list order, "No folder" last), so a
+        folder with only a couple of contributing channels still gets a
+        section, just a shorter one. Uses the same `entries` the table
+        itself lists, so both always agree on what's "in scope"."""
+        folder_name = {f["id"]: f["name"] for f in self.folder_store.list_folders()}
+        counts_by_folder: dict[str | None, dict[str, int]] = {}
+        channel_by_ref: dict[str, dict] = {}
+        for entry in entries:
+            ch = entry["channel"]
+            ref = _channel_ref(ch)
+            fid = self.folder_store.folder_for_channel(ch.get("key", ""))
+            counts_by_folder.setdefault(fid, {})
+            counts_by_folder[fid][ref] = counts_by_folder[fid].get(ref, 0) + 1
+            channel_by_ref.setdefault(ref, ch)
+
+        folder_order = [f["id"] for f in self.folder_store.list_folders()] + [None]
+        lines: list[str] = []
+        for fid in folder_order:
+            counts = counts_by_folder.get(fid)
+            if not counts:
+                continue
+            name = folder_name.get(fid, self.tr_("folder_none"))
+            top = sorted(counts.items(), key=lambda kv: kv[1], reverse=True)[:FOLDER_HITMAKERS_SHOWN]
+            lines.append(self.tr_("cqi_md_hitmakers_title", n=FOLDER_HITMAKERS_SHOWN, folder=name))
+            for i, (ref, count) in enumerate(top, 1):
+                label = _channel_label(channel_by_ref[ref]).replace("|", "")
+                lines.append(f"{i}. {count} {label}")
+            lines.append("")
+        return lines
+
+    def _build_export_md_table(self) -> str:
+        """"Top 10 {folder} hitmakers" per folder (see
+        _build_hitmakers_section), then one row per post (same
+        `_channel_limited_entries()` scope as the grid/Tg Links/hitmakers
+        above), with its cached thumbnail embedded directly as a base64
+        `data:image/jpeg` URI — self-contained, unlike a plain link, so the
+        table still shows real previews with nothing else to fetch. A post
+        with no cached thumbnail (see the "Fetch media" button) just gets
+        an em dash instead of a broken image reference."""
+        entries = self._channel_limited_entries()
+        lines = self._build_hitmakers_section(entries)
+
+        headers = [self.tr_("cqi_md_col_channel"), self.tr_("cqi_md_col_score"),
+                  self.tr_("cqi_md_col_thumbnail"), self.tr_("cqi_md_col_media"),
+                  self.tr_("cqi_md_col_text"), self.tr_("col_views"), self.tr_("col_shares"),
+                  self.tr_("cqi_md_col_link")]
+        lines.append("| " + " | ".join(headers) + " |")
+        lines.append("| " + " | ".join(["---"] * len(headers)) + " |")
+
+        for entry in entries:
+            ch = entry["channel"]
+            row = entry["row"]
+            channel_ref = _channel_ref(ch)
+            label = _channel_label(ch).replace("|", "")
+            score = round(post_gauge_value(entry["raw_score"]))
+            link = build_post_link(channel_ref, row.get("id", 0))
+
+            thumb_path = thumbnail_path(channel_ref, row.get("id", 0))
+            thumb_md = "—"
+            if thumb_path.exists():
+                try:
+                    b64 = base64.b64encode(thumb_path.read_bytes()).decode("ascii")
+                    thumb_md = f"![](data:image/jpeg;base64,{b64})"
+                except OSError:
+                    pass
+
+            media = format_media_counts(row.get("media_counts") or {})
+            if not media:
+                media = _MEDIA_PLACEHOLDERS.get(row.get("media_type") or "", "")
+
+            text = " ".join((row.get("text") or "").split()).replace("|", "")
+            if len(text) > _EXPORT_MD_TEXT_LEN:
+                text = text[:_EXPORT_MD_TEXT_LEN] + "…"
+
+            views = fmt_int(int(row.get("views", 0) or 0))
+            shares = fmt_int(int(row.get("forwards", 0) or 0))
+            lines.append(f"| {label} | {score} | {thumb_md} | {media} | {text} | "
+                        f"{views} | {shares} | {link} |")
+        return "\n".join(lines) + "\n"
+
+    def _on_export_md_clicked(self) -> None:
+        if not self._post_entries:
+            QMessageBox.information(self, self.tr_("app_title"), self.tr_("cqi_empty_posts"))
+            return
+        path, _ = QFileDialog.getSaveFileName(
+            self, self.tr_("cqi_export_md_btn"), "high_quality_posts.md", "Markdown (*.md)")
+        if not path:
+            return
+        try:
+            with open(path, "w", encoding="utf-8") as f:
+                f.write(self._build_export_md_table())
+        except OSError as exc:
+            QMessageBox.warning(self, self.tr_("app_title"), str(exc))
+            return
+        QMessageBox.information(self, self.tr_("app_title"), self.tr_("md_saved", path=path))
+
     # ---------------------------------------------------------- translate
     def retranslate(self) -> None:
         self.title_lbl.setText(self.tr_("nav_content_quality"))
@@ -798,6 +965,10 @@ class ContentQualityView(QWidget):
             self.fetch_media_btn.setText(self.tr_("cqi_fetch_media"))
         self.tg_links_btn.setText(self.tr_("cqi_tg_links"))
         self.tg_links_btn.setToolTip(self.tr_("cqi_tg_links_hint"))
+        self.export_md_btn.setText(self.tr_("cqi_export_md_btn"))
+        self.export_md_btn.setToolTip(self.tr_("cqi_export_md_hint"))
+        if self.folder_combo.count():
+            self.folder_combo.setItemText(0, self.tr_("cqi_all_folders"))
         self.max_posts_combo.setToolTip(self.tr_("cqi_max_posts_hint"))
         for i in range(self.max_posts_combo.count()):
             n = self.max_posts_combo.itemData(i)
@@ -815,13 +986,15 @@ class ContentQualityView(QWidget):
         self.hide_non_media_chk.setText(self.tr_("cqi_hide_non_media"))
         self.hide_non_media_chk.setToolTip(self.tr_("cqi_hide_non_media_hint"))
         self.pick_lbl.setText(self.tr_("folder_stat_pick_folder"))
-        self.no_folders_lbl.setText(self.tr_("folder_stat_no_folders"))
         self.empty_channels_lbl.setText(self.tr_("folder_stat_empty_channels"))
         self.empty_posts_lbl.setText(self.tr_("cqi_empty_posts"))
+        self.mode_halfyear_btn.setText(self.tr_("period_mode_halfyear"))
         self.mode_season_btn.setText(self.tr_("period_mode_season"))
         self.mode_month_btn.setText(self.tr_("period_mode_month"))
         self.mode_year_btn.setText(self.tr_("period_mode_year"))
         for key, btn in self._year_btns.items():
+            if isinstance(key, int):
+                continue  # calendar-year buttons are just numbers, nothing to translate
             label_key = next(lk for k, lk, _d in YEAR_WINDOW_OPTIONS if k == key)
             btn.setText(self.tr_(label_key))
         # Card tooltips embed translated text (see _score_tooltip) — rebuild

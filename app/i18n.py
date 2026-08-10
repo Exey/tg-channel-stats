@@ -168,6 +168,19 @@ EN = {
     "cqi_tg_links_dialog_title": "Tg Links",
     "cqi_tg_links_header": "{folder} / {period}",
     "cqi_tg_links_top_authors_title": "Best {n} authors",
+    "cqi_export_md_btn": "MD",
+    "cqi_export_md_hint": "Save the posts shown below as a Markdown table "
+                          "with each post's cached thumbnail embedded "
+                          "inline (base64) — self-contained, unlike the "
+                          "Tg Links list.",
+    "cqi_md_col_channel": "Channel",
+    "cqi_md_col_score": "Score CQI",
+    "cqi_md_col_thumbnail": "Thumbnail",
+    "cqi_md_col_media": "Media",
+    "cqi_md_col_text": "Text",
+    "cqi_md_col_link": "Link",
+    "cqi_md_hitmakers_title": "Top {n} {folder} hitmakers",
+    "cqi_all_folders": "All folders",
     "cqi_max_posts_n": "Top {n}",
     "cqi_max_posts_hint": "How many top posts to show overall — in the grid, "
                          "the per-channel limit and the Tg Links list.",
@@ -531,6 +544,19 @@ RU = {
     "cqi_tg_links_dialog_title": "Ссылки",
     "cqi_tg_links_header": "{folder} — лучшие посты за {period}",
     "cqi_tg_links_top_authors_title": "Лучшие {n} авторов",
+    "cqi_export_md_btn": "MD",
+    "cqi_export_md_hint": "Сохранить показанные посты как таблицу Markdown "
+                          "с превью каждого поста, встроенным прямо в "
+                          "файл (base64) — не требует внешних файлов, в "
+                          "отличие от списка ссылок.",
+    "cqi_md_col_channel": "Канал",
+    "cqi_md_col_score": "Балл CQI",
+    "cqi_md_col_thumbnail": "Превью",
+    "cqi_md_col_media": "Медиа",
+    "cqi_md_col_text": "Текст",
+    "cqi_md_col_link": "Ссылка",
+    "cqi_md_hitmakers_title": "Топ {n} лучших авторов папки «{folder}»",
+    "cqi_all_folders": "Все папки",
     "cqi_max_posts_n": "Топ {n}",
     "cqi_max_posts_hint": "Сколько постов показывать всего — в сетке, "
                          "лимите по каналу и списке ссылок.",
