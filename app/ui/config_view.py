@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import html
 import json
+from datetime import datetime
 from pathlib import Path
 
 from PySide6.QtCore import Qt, QUrl, Signal
@@ -21,6 +22,7 @@ from PySide6.QtWidgets import (
 from ..config import CONN_FIELDS, config_dir
 from ..folders import FolderStore
 from ..periods import period_key_label
+from ..scoring import post_gauge_value, post_score_raw
 from ..store import ChannelStore
 from ..tags import TagStore
 from ..tools.channel_stat import run_channel_stat
@@ -499,7 +501,7 @@ class ConfigView(QWidget):
                   self.tr_("folder_export_col_id"), self.tr_("folder_export_col_tag")]
         if extra:
             headers += [self.tr_("col_rating"), self.tr_("col_views"),
-                       self.tr_("col_viral_share")]
+                       self.tr_("col_viral_share"), self.tr_("col_post_quality")]
         lines = ["| " + " | ".join(headers) + " |",
                  "| " + " | ".join(["---"] * len(headers)) + " |"]
 
@@ -525,17 +527,18 @@ class ConfigView(QWidget):
             if extra:
                 metrics = metrics_by_key.get(ch["key"])
                 if metrics is None:
-                    row += ["—", "—", "—"]
+                    row += ["—", "—", "—", "—"]
                 else:
-                    score, views, viral_share = metrics
-                    row += [f"{score:.3f}", fmt_int(views), f"{viral_share:.1f}%"]
+                    score, views, viral_share, quality = metrics
+                    row += [f"{score:.3f}", fmt_int(views), f"{viral_share:.1f}%",
+                            str(round(quality))]
             lines.append("| " + " | ".join(row) + " |")
         return "\n".join(lines) + "\n"
 
     def _collect_export_metrics(self, summaries: list[dict], mode: str,
                                 target_key: tuple | None) -> dict[str, tuple]:
-        """channel key -> (score, views, viral_share_pct), scored exactly
-        like FolderStatView's Periodic Stats: entries are grouped by folder
+        """channel key -> (score, views, viral_share_pct, quality), scored
+        exactly like FolderStatView's Periodic Stats: entries are grouped by folder
         (channels with no folder form their own group) and normalized
         against only their own group's peers for the same period, via
         FolderStatView._score_entries — that's what makes a channel's
@@ -560,20 +563,33 @@ class ConfigView(QWidget):
                 continue
             FolderStatView._score_entries(entries)
             for e in entries:
-                out[e["key"]] = (e["score"], e["views"], e["viral_share"])
+                out[e["key"]] = (e["score"], e["views"], e["viral_share"], e["quality"])
         return out
 
     @staticmethod
     def _channel_bucket_totals(data: dict, mode: str,
                                target_key: tuple | None) -> dict | None:
-        """{"views","shares","reactions","viral_share"} totals for one
+        """{"views","shares","reactions","viral_share","quality"} for one
         channel's full checkpoint, scoped to `mode` — "all" sums every
         scanned post ever (`distributions.monthly`); "halfyear"/"season"
         use just the one bucket matching `target_key`. None if the channel
         has no data in scope at all (empty monthly history for "all", or no
         bucket matching `target_key`), so the caller can tell "genuinely no
-        data" apart from "scored zero"."""
+        data" apart from "scored zero".
+
+        Quality is the same gauge score every post card/trend line in the
+        app shows (app.scoring), averaged over whatever of the channel's
+        stored top-N pool (`rows`) falls in scope — `rows` is a sample, not
+        every scanned post, same caveat as Folder Stats' own Post Quality
+        column (see FolderStatView._collect_periods)."""
         monthly = data.get("distributions", {}).get("monthly") or []
+        avg_views = data.get("stats", {}).get("avg_views", 0) or 0
+
+        def _quality(rows: list[dict]) -> float:
+            if not rows:
+                return 0
+            return sum(post_gauge_value(post_score_raw(r, avg_views)) for r in rows) / len(rows)
+
         if mode == "all":
             if not monthly:
                 return None
@@ -584,6 +600,7 @@ class ConfigView(QWidget):
                 "shares": sum(int(m.get("shares", 0) or 0) for m in monthly),
                 "reactions": sum(int(m.get("reactions", 0) or 0) for m in monthly),
                 "viral_share": viral_count / count * 100 if count else 0,
+                "quality": _quality(data.get("rows", []) or []),
             }
 
         buckets: dict[tuple, dict] = {}
@@ -606,9 +623,19 @@ class ConfigView(QWidget):
         if target_key not in buckets:
             return None
         b = buckets[target_key]
+
+        period_rows = []
+        for r in data.get("rows", []) or []:
+            try:
+                dt = datetime.fromisoformat((r.get("date") or "").replace("Z", "+00:00"))
+            except ValueError:
+                continue
+            if period_key_label(dt.year, dt.month, mode)[0] == target_key:
+                period_rows.append(r)
         return {
             "views": b["views"], "shares": b["shares"], "reactions": b["reactions"],
             "viral_share": b["viral_count"] / b["count"] * 100 if b["count"] else 0,
+            "quality": _quality(period_rows),
         }
 
     def _on_export_folders_md(self) -> None:

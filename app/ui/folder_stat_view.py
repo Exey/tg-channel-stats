@@ -33,6 +33,7 @@ from ..folders import FolderStore
 from ..periods import (
     YEAR_WINDOW_OPTIONS, period_key_label as _period_key_label, year_window_cutoff,
 )
+from ..scoring import post_gauge_value, post_score_raw
 from ..store import ChannelStore
 from .dashboard_view import build_post_link, fmt_int
 from .widgets import SectionCard, hline
@@ -71,9 +72,13 @@ def _channel_label(ch: dict) -> str:
     return ch.get("title") or ch.get("channel") or ch.get("key", "?")
 
 
+def _channel_avg_views(ch: dict) -> float:
+    return float(ch.get("stats", {}).get("avg_views", 0) or 0)
+
+
 class FolderStatView(QWidget):
-    # period_table column index -> sortable (Most viewed post / Name / Website aren't).
-    _PERIOD_SORTABLE_COLS = {0, 1, 2, 3, 4, 6, 7}
+    # period_table column index -> sortable (Most viewed post isn't).
+    _PERIOD_SORTABLE_COLS = {0, 1, 2, 3, 4, 6, 7, 8}
 
     def __init__(self, i18n, folder_store: FolderStore, channel_store: ChannelStore,
                  parent=None) -> None:
@@ -242,12 +247,11 @@ class FolderStatView(QWidget):
         self.period_empty_lbl = QLabel(self.tr_("folder_stat_period_empty"))
         self.period_empty_lbl.setObjectName("hint")
 
-        self.period_table = QTableWidget(0, 10)
+        self.period_table = QTableWidget(0, 9)
         self.period_table.setHorizontalHeaderLabels([
             self.tr_("col_channel_title"), self.tr_("col_username_id"), self.tr_("col_views"),
             self.tr_("col_shares"), self.tr_("col_reactions"), self.tr_("col_most_viewed"),
-            self.tr_("col_viral_share"), self.tr_("col_rating"), self.tr_("col_name"),
-            self.tr_("col_website")])
+            self.tr_("col_viral_share"), self.tr_("col_rating"), self.tr_("col_post_quality")])
         self.period_table.verticalHeader().setVisible(False)
         self.period_table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
         self.period_table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
@@ -383,14 +387,18 @@ class FolderStatView(QWidget):
     def _collect_periods(self, mode: str) -> dict[tuple, dict]:
         """Per-period totals for the *currently selected folder's* channels.
 
-        Everything — views/shares/reactions/viral-share and the "most viewed
-        post" — comes from each checkpoint's `distributions.monthly`, which
-        the fetcher fills from *every* scanned post, not just the stored
-        top-N sample in `rows`. Checkpoints fetched before these fields
-        existed report zero/blank here until refetched.
+        Views/shares/reactions/viral-share and the "most viewed post" come
+        from each checkpoint's `distributions.monthly`, which the fetcher
+        fills from *every* scanned post, not just the stored top-N sample
+        in `rows` (checkpoints fetched before these fields existed report
+        zero/blank here until refetched). Post Quality is the exception —
+        app.scoring's gauge score needs per-post reactions/forwards/
+        comments/views, which only `rows` carries, so it's averaged over
+        whatever of that top-N pool falls in each bucket instead.
         """
         periods: dict[tuple, dict] = {}
         for ch in self._channels:
+            avg_views = _channel_avg_views(ch)
             buckets: dict[tuple, dict] = {}
             for m in ch.get("distributions", {}).get("monthly") or []:
                 count = int(m.get("count", 0) or 0)
@@ -424,12 +432,29 @@ class FolderStatView(QWidget):
                            or int(top.get("views", 0) or 0) > int(b["top_row"].get("views", 0) or 0)):
                     b["top_row"] = top
 
+            quality_scores: dict[tuple, list[float]] = {}
+            for r in ch.get("rows", []) or []:
+                dt = _parse_date(r.get("date", ""))
+                if dt is None:
+                    continue
+                if mode == "year":
+                    cutoff = year_window_cutoff(self._year_window_days())
+                    if cutoff is not None and dt < cutoff:
+                        continue
+                    key = ("year", self._year_window_key)
+                else:
+                    key, _label = _period_key_label(dt.year, dt.month, mode)
+                quality_scores.setdefault(key, []).append(
+                    post_gauge_value(post_score_raw(r, avg_views)))
+
             for key, b in buckets.items():
                 bucket = periods.setdefault(key, {"label": b["label"], "entries": []})
+                scores = quality_scores.get(key)
                 bucket["entries"].append({
                     "channel": ch, "views": b["views"], "shares": b["shares"],
                     "reactions": b["reactions"], "top_row": b["top_row"],
                     "viral_share": b["viral_count"] / b["count"] * 100,
+                    "quality": (sum(scores) / len(scores)) if scores else 0,
                 })
         for bucket in periods.values():
             self._score_entries(bucket["entries"])
@@ -438,6 +463,7 @@ class FolderStatView(QWidget):
     _VIRALITY_WEIGHT_MIN = 0.20
     _VIRALITY_WEIGHT_MAX = 0.51
     _ENGAGEMENT_WEIGHT = 0.20
+    _QUALITY_WEIGHT = 0.25
 
     @staticmethod
     def _virality_component(viral_share: float) -> float:
@@ -467,30 +493,37 @@ class FolderStatView(QWidget):
 
     @staticmethod
     def _score_entries(entries: list[dict]) -> None:
-        """Composite 0-1 rating per entry: a fixed 20% engagement, a
-        virality weight that itself ramps from 20% to 51% with viral share
-        (see `_virality_weight`) applied to the virality score (see
+        """Composite 0-1 rating per entry: a fixed 20% engagement, a fixed
+        25% Post Quality (see `_collect_periods`' `quality`), a virality
+        weight that itself ramps from 20% to 51% with viral share (see
+        `_virality_weight`) applied to the virality score (see
         `_virality_component`), and period views taking whatever weight is
-        left (80% - virality weight) — so views weight shrinks as virality
-        weight grows. Engagement and views are min-max normalized against
-        the other channels in the same period bucket; virality uses an
-        absolute viral-share curve so it doesn't get diluted by how other
-        channels in the folder performed.
+        left (55% - virality weight) — so views weight shrinks as virality
+        weight grows. Engagement, Post Quality and views are min-max
+        normalized against the other channels in the same period bucket;
+        virality uses an absolute viral-share curve so it doesn't get
+        diluted by how other channels in the folder performed.
         """
         if not entries:
             return
         views_vals = [e["views"] for e in entries]
         eng_vals = [e["shares"] + e["reactions"] for e in entries]
+        quality_vals = [e["quality"] for e in entries]
         vw_min, vw_max = min(views_vals), max(views_vals)
         eg_min, eg_max = min(eng_vals), max(eng_vals)
+        qa_min, qa_max = min(quality_vals), max(quality_vals)
         for e in entries:
             views_norm = (e["views"] - vw_min) / (vw_max - vw_min) if vw_max != vw_min else 0
             eng = e["shares"] + e["reactions"]
             eng_norm = (eng - eg_min) / (eg_max - eg_min) if eg_max != eg_min else 0
+            quality_norm = ((e["quality"] - qa_min) / (qa_max - qa_min)
+                            if qa_max != qa_min else 0)
             viral_score = FolderStatView._virality_component(e["viral_share"])
             virality_weight = FolderStatView._virality_weight(e["viral_share"])
-            views_weight = (1.0 - FolderStatView._ENGAGEMENT_WEIGHT) - virality_weight
+            views_weight = (1.0 - FolderStatView._ENGAGEMENT_WEIGHT
+                            - FolderStatView._QUALITY_WEIGHT) - virality_weight
             e["score"] = (FolderStatView._ENGAGEMENT_WEIGHT * eng_norm
+                         + FolderStatView._QUALITY_WEIGHT * quality_norm
                          + virality_weight * viral_score
                          + views_weight * views_norm)
 
@@ -698,6 +731,8 @@ class FolderStatView(QWidget):
             return entry["viral_share"]
         if col == 7:
             return entry["score"]
+        if col == 8:
+            return entry["quality"]
         return 0
 
     def _on_period_header_clicked(self, col: int) -> None:
@@ -741,8 +776,7 @@ class FolderStatView(QWidget):
 
             self.period_table.setItem(i, 6, QTableWidgetItem(f"{entry['viral_share']:.4f}%"))
             self.period_table.setItem(i, 7, QTableWidgetItem(f"{entry['score']:.3f}"))
-            self.period_table.setItem(i, 8, QTableWidgetItem(""))
-            self.period_table.setItem(i, 9, QTableWidgetItem(""))
+            self.period_table.setItem(i, 8, QTableWidgetItem(str(round(entry["quality"]))))
 
         order = (Qt.SortOrder.DescendingOrder if self._period_sort_desc
                  else Qt.SortOrder.AscendingOrder)
@@ -773,7 +807,7 @@ class FolderStatView(QWidget):
         headers = [self.tr_("col_username_id"), self.tr_("col_views"), self.tr_("col_shares"),
                    self.tr_("col_reactions"), self.tr_("col_most_viewed"),
                    self.tr_("col_viral_share"), self.tr_("col_rating"),
-                   self.tr_("col_name"), self.tr_("col_website")]
+                   self.tr_("col_post_quality")]
         lines = [f"# {self.folder_combo.currentText()}", ""]
         for key in sorted(self._periods):
             bucket = self._periods[key]
@@ -797,7 +831,7 @@ class FolderStatView(QWidget):
                 lines.append(
                     f"| {_channel_uid(ch)} | {entry['views']} | {entry['shares']} | "
                     f"{entry['reactions']} | {post_md} | {entry['viral_share']:.4f}% | "
-                    f"{entry['score']:.3f} |  |  |")
+                    f"{entry['score']:.3f} | {round(entry['quality'])} |")
             lines.append("")
         return "\n".join(lines).rstrip("\n") + "\n"
 
@@ -850,5 +884,4 @@ class FolderStatView(QWidget):
         self.period_table.setHorizontalHeaderLabels([
             self.tr_("col_channel_title"), self.tr_("col_username_id"), self.tr_("col_views"),
             self.tr_("col_shares"), self.tr_("col_reactions"), self.tr_("col_most_viewed"),
-            self.tr_("col_viral_share"), self.tr_("col_rating"), self.tr_("col_name"),
-            self.tr_("col_website")])
+            self.tr_("col_viral_share"), self.tr_("col_rating"), self.tr_("col_post_quality")])
