@@ -82,6 +82,14 @@ def _media_type(msg) -> str:
     return ""
 
 
+def _has_buttons(msg) -> bool:
+    """Whether this message carries an inline keyboard — ads/CTAs commonly
+    attach one, and app.scoring excludes posts like that from content-
+    quality scoring, since clicks it's fishing for aren't the same signal
+    as organic engagement."""
+    return getattr(msg, "reply_markup", None) is not None
+
+
 def _preview(text: str, limit: int = 140) -> str:
     text = " ".join((text or "").split())
     return text if len(text) <= limit else text[: limit - 1] + "…"
@@ -379,6 +387,7 @@ async def run_channel_stat(client, p: dict, ctx) -> str:
         forwards = int(getattr(msg, "forwards", 0) or 0)
         comments = _comment_total(msg)
         media_type = _media_type(msg)
+        has_buttons = _has_buttons(msg)
 
         if gid is not None and gid == current_gid:
             # Same album — merge into the row being built (see channel_top).
@@ -388,6 +397,10 @@ async def run_channel_stat(client, p: dict, ctx) -> str:
             current["reactions"] = max(current["reactions"], reactions)
             current["forwards"] = max(current["forwards"], forwards)
             current["comments"] = max(current["comments"], comments)
+            # OR, not anchor-only like media_type below — an inline
+            # keyboard on *any* member of the album is enough to treat the
+            # whole merged post as button-driven.
+            current["has_buttons"] = current["has_buttons"] or has_buttons
             if media_type:
                 current["media_counts"][media_type] = (
                     current["media_counts"].get(media_type, 0) + 1)
@@ -418,6 +431,9 @@ async def run_channel_stat(client, p: dict, ctx) -> str:
                 # so the High-Quality Posts grid can show "×7🏞️" etc. on
                 # the card instead of just the cover item's single icon.
                 "media_counts": {media_type: 1} if media_type else {},
+                # See _has_buttons — OR'd across the whole album in the
+                # merge branch above, not anchor-only.
+                "has_buttons": has_buttons,
                 "public": None,
             }
             current_gid = gid

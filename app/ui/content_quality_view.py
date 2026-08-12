@@ -110,6 +110,28 @@ def _channel_members(ch: dict) -> int:
     return int(ch.get("info", {}).get("members", 0) or 0)
 
 
+# Per-channel post cap for cross-channel balance on a big Top-N (see
+# _channel_limited_entries) — smaller channels get a tighter cap so a
+# handful of very engaged small channels can't fill most of a big
+# Top 50+/100+/etc. slate. None = no cap (7000+ followers).
+_FOLLOWERS_CAP_BREAKPOINTS = [(2000, 5), (3000, 6), (4000, 7), (5000, 8), (7000, 9)]
+
+
+def _followers_cap(members: int) -> int | None:
+    for threshold, cap in _FOLLOWERS_CAP_BREAKPOINTS:
+        if members < threshold:
+            return cap
+    return None
+
+
+# Also gated on Top 50+ (see _channel_limited_entries): a post this weak on
+# *both* fronts at once doesn't belong in a big ranked slate — but either
+# one alone is enough to keep it (a high-view post with 0 shares is still
+# fine, and vice versa).
+_TOP50_MIN_VIEWS = 4000
+_TOP50_MIN_SHARES = 11
+
+
 class ContentQualityView(QWidget):
     def __init__(self, i18n, folder_store: FolderStore, channel_store: ChannelStore,
                  cfg: Config, parent=None) -> None:
@@ -639,19 +661,28 @@ class ContentQualityView(QWidget):
         """`self._post_entries` (already best-first, unbounded — see
         _collect_posts), with non-media posts and posts from channels below
         the minimum-followers threshold dropped first (see hide_non_media_chk/
-        min_followers_combo), then capped to at most N posts per channel,
-        N = the Tg Links limit combo's current value (0 = no cap), *and* to
-        at most the max-posts combo's current value overall (default
-        MAX_POSTS_SHOWN) — shared by the grid and the generated Tg Links
-        list so both always agree on which posts are "in scope". Applying
-        the per-channel cap here, before the overall cap, means a
-        restrictive limit still fills up to the overall cap by reaching
-        further down the ranked list across other channels, the same as
-        when no limit is set at all."""
+        min_followers_combo). Once the max-posts combo is at Top 50 or
+        above, two more balance rules kick in (see `top50_rules` below):
+        a per-channel cap scaled by follower count (_followers_cap) — on
+        top of, and whichever is stricter than, the Tg Links limit combo's
+        own per-channel cap (0 = no cap) — and dropping any post that's
+        weak on *both* views and shares at once (neither alone disqualifies
+        it). Finally capped to at most the max-posts combo's current value
+        overall (default MAX_POSTS_SHOWN) — shared by the grid and the
+        generated Tg Links/MD exports so all three always agree on which
+        posts are "in scope". Applying the per-channel cap before the
+        overall cap means a restrictive limit still fills up to the
+        overall cap by reaching further down the ranked list across other
+        channels, the same as when no limit is set at all."""
         limit = int(self.tg_links_limit_combo.currentData() or 0)
         hide_non_media = self.hide_non_media_chk.isChecked()
         min_followers = int(self.min_followers_combo.currentData() or 0)
         max_posts = int(self.max_posts_combo.currentData() or MAX_POSTS_SHOWN)
+        # Below Top 50, natural competition for slots already keeps any one
+        # channel from dominating and weak posts from surfacing at all —
+        # these extra rules only matter once there's enough room for them
+        # to slip through.
+        top50_rules = max_posts >= 50
         seen: dict[str, int] = {}
         out: list[dict] = []
         for entry in self._post_entries:
@@ -659,14 +690,24 @@ class ContentQualityView(QWidget):
                 break
             if hide_non_media and not (entry["row"].get("media_type") or ""):
                 continue
-            if min_followers and _channel_members(entry["channel"]) < min_followers:
+            members = _channel_members(entry["channel"])
+            if min_followers and members < min_followers:
                 continue
-            if limit:
-                key = _channel_ref(entry["channel"])
-                count = seen.get(key, 0)
-                if count >= limit:
+            if top50_rules:
+                views = int(entry["row"].get("views", 0) or 0)
+                shares = int(entry["row"].get("forwards", 0) or 0)
+                if views < _TOP50_MIN_VIEWS and shares < _TOP50_MIN_SHARES:
                     continue
-                seen[key] = count + 1
+            effective_limit = limit or None
+            if top50_rules:
+                fcap = _followers_cap(members)
+                if fcap is not None:
+                    effective_limit = fcap if effective_limit is None else min(effective_limit, fcap)
+            key = _channel_ref(entry["channel"])
+            count = seen.get(key, 0)
+            if effective_limit is not None and count >= effective_limit:
+                continue
+            seen[key] = count + 1
             out.append(entry)
         return out
 
@@ -756,6 +797,18 @@ class ContentQualityView(QWidget):
         entries = self._channel_limited_entries()
         if not entries or self._media_worker is not None:
             return
+        # Only posts that don't already have a cached thumbnail (see
+        # media_cache.thumbnail_path) — media_fetch.run_thumbnail_cache
+        # would skip re-downloading them anyway, but filtering here too
+        # means the "Fetching N post(s)" progress/log is accurate and no
+        # get_messages call is spent on posts nothing is going to be
+        # downloaded for.
+        to_fetch = [e for e in entries if not thumbnail_path(
+            _channel_ref(e["channel"]), e["row"].get("id", 0)).exists()]
+        if not to_fetch:
+            QMessageBox.information(self, self.tr_("app_title"),
+                                    self.tr_("cqi_fetch_media_all_cached"))
+            return
         conn = {
             "api_id": self.cfg.get("API_ID").strip(),
             "api_hash": self.cfg.get("API_HASH").strip(),
@@ -769,7 +822,7 @@ class ContentQualityView(QWidget):
 
         posts = [{"channel": _channel_ref(e["channel"]), "id": e["row"].get("id", 0),
                  "ids": e["row"].get("ids") or [e["row"].get("id", 0)]}
-                 for e in entries]
+                 for e in to_fetch]
         self.fetch_media_btn.setEnabled(False)
         self.fetch_media_btn.setText(self.tr_("cqi_fetch_media_running"))
         self._set_media_log("")

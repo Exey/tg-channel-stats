@@ -141,6 +141,8 @@ EN = {
                             "cached are fetched)",
     "cqi_fetch_media_need_login": "Add your Telegram API credentials on the "
                                   "Config screen first.",
+    "cqi_fetch_media_all_cached": "Every post shown below already has a "
+                                  "cached thumbnail — nothing new to fetch.",
     "cqi_fetch_media_login_required": "This needs a Telegram login — please "
                                       "log in from the Config screen first, "
                                       "then try again.",
@@ -516,6 +518,8 @@ RU = {
                             "нет кэша)",
     "cqi_fetch_media_need_login": "Сначала добавьте данные Telegram API на "
                                   "экране настроек.",
+    "cqi_fetch_media_all_cached": "У всех показанных постов уже есть "
+                                  "кэшированное превью — загружать нечего.",
     "cqi_fetch_media_login_required": "Нужен вход в Telegram — сначала "
                                       "войдите на экране настроек, затем "
                                       "попробуйте снова.",

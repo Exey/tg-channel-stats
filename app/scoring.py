@@ -50,6 +50,14 @@ trimmed/capped to tame single-post outliers) that was dropped once that
 view switched to scoring individual posts — the viral-excess term above is
 a deliberate, narrower reintroduction of that same avg_views comparison at
 the per-post level, not a return to scoring whole channels.
+
+A post with an inline keyboard (`row["has_buttons"]`, set by
+app.tools.channel_stat from Telethon's `Message.reply_markup`) scores 0
+outright, before any of the above — ad/CTA posts commonly attach one, and
+whatever engagement they draw is being pulled by the button, not the
+content, so they shouldn't surface as "high quality" regardless of their
+raw numbers. Checkpoints fetched before this field existed just don't have
+it, so nothing is excluded there until refetched.
 """
 from __future__ import annotations
 
@@ -84,7 +92,16 @@ def reaction_weighted(reactions: int) -> float:
 
 def post_score_raw(row: dict, avg_views: float) -> float:
     """ERV% × 100 for one post — see module docstring. `avg_views` is that
-    post's own channel's average (checkpoint `stats.avg_views`)."""
+    post's own channel's average (checkpoint `stats.avg_views`).
+
+    Scores 0 outright for a post with an inline keyboard (`has_buttons`,
+    see app.tools.channel_stat) — an ad/CTA button is what's driving
+    engagement there, not the content, so it shouldn't rank as
+    high-quality regardless of its raw numbers. Checkpoints fetched before
+    that field existed don't have it and so are never excluded until
+    refetched."""
+    if row.get("has_buttons"):
+        return 0.0
     views = int(row.get("views", 0) or 0)
     if not views:
         return 0.0

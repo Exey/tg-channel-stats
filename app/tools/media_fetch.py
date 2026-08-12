@@ -48,18 +48,31 @@ async def run_thumbnail_cache(client, p: dict, ctx) -> str:
     for channel, channel_posts in by_channel.items():
         if ctx.cancelled():
             break
+
+        # Drop already-cached posts *before* asking Telegram for anything —
+        # no point spending a get_messages call (and rate-limit budget) on
+        # media nothing is going to be downloaded for.
+        to_fetch = [post for post in channel_posts
+                   if not thumbnail_path(channel, int(post.get("id", 0))).exists()]
+        skipped = len(channel_posts) - len(to_fetch)
+        done += skipped
+        if skipped:
+            ctx.progress(done, total)
+        if not to_fetch:
+            continue
+
         try:
             entity = await resolve_entity(client, channel)
         except Exception as exc:
             ctx.log(f"  {channel}: {exc}")
-            done += len(channel_posts)
+            done += len(to_fetch)
             ctx.progress(done, total)
             continue
 
         # Fetch every candidate message across every post for this channel
         # in one batched pass — cheaper than one request per post.
         all_ids: list[int] = []
-        for post in channel_posts:
+        for post in to_fetch:
             all_ids.extend(int(i) for i in (post.get("ids") or [post.get("id", 0)]))
         by_id: dict[int, object] = {}
         for i in range(0, len(all_ids), _BATCH):
@@ -71,15 +84,13 @@ async def run_thumbnail_cache(client, p: dict, ctx) -> str:
                 if msg is not None:
                     by_id[msg.id] = msg
 
-        for post in channel_posts:
+        for post in to_fetch:
             done += 1
             ctx.progress(done, total)
             if ctx.cancelled():
                 break
             canonical_id = int(post.get("id", 0))
             dest = thumbnail_path(channel, canonical_id)
-            if dest.exists():
-                continue
             candidate_ids = [int(i) for i in (post.get("ids") or [canonical_id])]
             for mid in candidate_ids:
                 msg = by_id.get(mid)
