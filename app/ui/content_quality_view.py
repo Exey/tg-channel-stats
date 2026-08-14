@@ -47,6 +47,7 @@ from PySide6.QtWidgets import (
 )
 
 from ..config import Config
+from ..errors import friendly_os_error
 from ..folders import FolderStore
 from ..media_cache import thumbnail_path
 from ..periods import YEAR_WINDOW_OPTIONS, period_key_label, year_window_cutoff
@@ -1006,7 +1007,7 @@ class ContentQualityView(QWidget):
             with open(path, "w", encoding="utf-8") as f:
                 f.write(self._build_export_md_table())
         except OSError as exc:
-            QMessageBox.warning(self, self.tr_("app_title"), str(exc))
+            QMessageBox.warning(self, self.tr_("app_title"), friendly_os_error(exc))
             return
         QMessageBox.information(self, self.tr_("app_title"), self.tr_("md_saved", path=path))
 

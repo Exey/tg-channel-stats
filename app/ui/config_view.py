@@ -20,6 +20,7 @@ from PySide6.QtWidgets import (
 )
 
 from ..config import CONN_FIELDS, config_dir
+from ..errors import friendly_os_error
 from ..folders import FolderStore
 from ..periods import period_key_label
 from ..rating import score_entries
@@ -377,7 +378,7 @@ class ConfigView(QWidget):
         try:
             n = self.tag_store.load_from_md(path)
         except OSError as exc:
-            QMessageBox.warning(self, self.tr_("app_title"), str(exc))
+            QMessageBox.warning(self, self.tr_("app_title"), friendly_os_error(exc))
             return
         if n == 0:
             QMessageBox.warning(self, self.tr_("app_title"), self.tr_("tag_load_md_empty"))
@@ -651,7 +652,7 @@ class ConfigView(QWidget):
             with open(path, "w", encoding="utf-8") as f:
                 f.write(self._build_folders_md())
         except OSError as exc:
-            QMessageBox.warning(self, self.tr_("app_title"), str(exc))
+            QMessageBox.warning(self, self.tr_("app_title"), friendly_os_error(exc))
             return
         QMessageBox.information(self, self.tr_("app_title"),
                                 self.tr_("md_saved", path=path))

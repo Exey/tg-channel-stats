@@ -11,6 +11,7 @@ import os
 import sys
 from pathlib import Path
 
+from app.errors import friendly_os_error
 from app.version import __version__
 
 APP_NAME = "TgChannelStat"
@@ -51,8 +52,22 @@ def _configure_logging() -> None:
     logging.getLogger("telethon").setLevel(logging.WARNING)
 
 
+def _install_excepthook() -> None:
+    def handle(exc_type: type[BaseException], exc: BaseException, tb) -> None:
+        logging.getLogger(__name__).critical(
+            "Unhandled exception", exc_info=(exc_type, exc, tb))
+        message = friendly_os_error(exc) if isinstance(exc, OSError) else str(exc)
+
+        from PySide6.QtWidgets import QApplication, QMessageBox
+        if QApplication.instance() is not None:
+            QMessageBox.critical(None, APP_NAME, message or exc_type.__name__)
+
+    sys.excepthook = handle
+
+
 def main() -> int:
     _configure_logging()
+    _install_excepthook()
     logging.getLogger(__name__).info(
         "%s %s starting (platform=%s, python=%s)",
         APP_NAME, __version__, sys.platform, sys.version.split()[0])

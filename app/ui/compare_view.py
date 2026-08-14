@@ -14,6 +14,7 @@ from PySide6.QtWidgets import (
     QStackedLayout, QVBoxLayout, QWidget,
 )
 
+from ..errors import friendly_os_error
 from .dashboard_view import fmt_int, short_num
 from .theme import COLORS
 from .widgets import StatCard, hline
@@ -290,6 +291,6 @@ class CompareView(QWidget):
             with open(path, "w", encoding="utf-8") as f:
                 f.write(md)
         except OSError as exc:
-            QMessageBox.warning(self, self.tr_("app_title"), str(exc))
+            QMessageBox.warning(self, self.tr_("app_title"), friendly_os_error(exc))
             return
         QMessageBox.information(self, self.tr_("app_title"), self.tr_("md_saved", path=path))
