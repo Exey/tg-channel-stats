@@ -173,12 +173,15 @@ class ConfigView(QWidget):
         self.fetch_help_lbl.setWordWrap(True)
         card.body.addWidget(self.fetch_help_lbl)
 
-        self.fetch_form = QFormLayout()
-        self.fetch_form.setSpacing(10)
+        self.channel_lbl = QLabel(self.tr_("fetch_channel"))
+        card.body.addWidget(self.channel_lbl)
         self.channel_edit = QLineEdit(self.cfg.get("CHANNEL_ID"))
         self.channel_edit.setPlaceholderText(self.tr_("fetch_channel_placeholder"))
-        self.fetch_form.addRow(self.tr_("fetch_channel"), self.channel_edit)
+        self.channel_edit.setClearButtonEnabled(True)
+        card.body.addWidget(self.channel_edit)
 
+        self.fetch_form = QFormLayout()
+        self.fetch_form.setSpacing(10)
         self.period_combo = QComboBox()
         self.period_combo.addItems([self.tr_(f"period_{k}") for k in PERIOD_KEYS])
         self.period_combo.setCurrentIndex(0)  # 2 years
@@ -671,9 +674,7 @@ class ConfigView(QWidget):
 
         self.fetch_card_ref.title_lbl.setText(self.tr_("fetch_title"))
         self.fetch_help_lbl.setText(self.tr_("fetch_help"))
-        lbl = self.fetch_form.labelForField(self.channel_edit)
-        if lbl:
-            lbl.setText(self.tr_("fetch_channel"))
+        self.channel_lbl.setText(self.tr_("fetch_channel"))
         self.channel_edit.setPlaceholderText(self.tr_("fetch_channel_placeholder"))
         lbl = self.fetch_form.labelForField(self.period_combo)
         if lbl:
