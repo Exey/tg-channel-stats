@@ -16,7 +16,7 @@ from PySide6.QtGui import QDesktopServices
 from PySide6.QtWidgets import (
     QCheckBox, QComboBox, QFileDialog, QFormLayout, QGroupBox, QHBoxLayout,
     QInputDialog, QLabel, QLineEdit, QMessageBox, QPlainTextEdit, QProgressBar,
-    QPushButton, QScrollArea, QSpinBox, QVBoxLayout, QWidget,
+    QPushButton, QScrollArea, QVBoxLayout, QWidget,
 )
 
 from ..config import CONN_FIELDS, config_dir
@@ -178,11 +178,6 @@ class ConfigView(QWidget):
         self.channel_edit = QLineEdit(self.cfg.get("CHANNEL_ID"))
         self.channel_edit.setPlaceholderText(self.tr_("fetch_channel_placeholder"))
         self.fetch_form.addRow(self.tr_("fetch_channel"), self.channel_edit)
-
-        self.top_spin = QSpinBox()
-        self.top_spin.setRange(1, 1000)
-        self.top_spin.setValue(20)
-        self.fetch_form.addRow(self.tr_("fetch_top_n"), self.top_spin)
 
         self.period_combo = QComboBox()
         self.period_combo.addItems([self.tr_(f"period_{k}") for k in PERIOD_KEYS])
@@ -680,9 +675,6 @@ class ConfigView(QWidget):
         if lbl:
             lbl.setText(self.tr_("fetch_channel"))
         self.channel_edit.setPlaceholderText(self.tr_("fetch_channel_placeholder"))
-        lbl = self.fetch_form.labelForField(self.top_spin)
-        if lbl:
-            lbl.setText(self.tr_("fetch_top_n"))
         lbl = self.fetch_form.labelForField(self.period_combo)
         if lbl:
             lbl.setText(self.tr_("fetch_period"))
@@ -835,7 +827,6 @@ class ConfigView(QWidget):
             return
         params = {
             "channel": channel,
-            "top_n": self.top_spin.value(),
             "period": PERIOD_KEYS[self.period_combo.currentIndex()],
             "fetch_public": self.public_check.isChecked(),
         }
@@ -854,7 +845,6 @@ class ConfigView(QWidget):
         self.channel_edit.setText(params["channel"])
         if params.get("period") in PERIOD_KEYS:
             self.period_combo.setCurrentIndex(PERIOD_KEYS.index(params["period"]))
-        self.top_spin.setValue(int(params.get("top_n") or 20))
         self.public_check.setChecked(bool(params.get("fetch_public")))
 
         self.cfg.profile["CHANNEL_ID"] = params["channel"]
