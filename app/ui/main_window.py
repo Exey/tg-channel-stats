@@ -20,6 +20,7 @@ from .config_view import ConfigView
 from .content_quality_view import ContentQualityView
 from .dashboard_view import DashboardView
 from .folder_stat_view import FolderStatView
+from .mutual_pr_view import MutualPrView
 from .side_panel import SidePanel
 from .theme import apply_theme
 
@@ -59,6 +60,7 @@ class MainWindow(QMainWindow):
         self.side.config_selected.connect(self._show_config)
         self.side.folder_stat_selected.connect(self._show_folder_stat)
         self.side.content_quality_selected.connect(self._show_content_quality)
+        self.side.mutual_pr_selected.connect(self._show_mutual_pr)
         self.side.channel_selected.connect(self._show_channel)
         self.side.compare_requested.connect(self._show_compare)
         self.side.compare_mode_off.connect(self._on_compare_mode_off)
@@ -103,12 +105,14 @@ class MainWindow(QMainWindow):
         self.folder_stat = FolderStatView(self.i18n, self.folder_store, self.store)
         self.compare_charts = CompareChartsView(self.i18n)
         self.content_quality = ContentQualityView(self.i18n, self.folder_store, self.store, self.cfg)
+        self.mutual_pr = MutualPrView(self.i18n, self.folder_store, self.store)
         self.stack.addWidget(self.config_view)       # index 0
         self.stack.addWidget(self.dashboard)         # index 1
         self.stack.addWidget(self.compare)           # index 2
         self.stack.addWidget(self.folder_stat)       # index 3
         self.stack.addWidget(self.compare_charts)    # index 4
         self.stack.addWidget(self.content_quality)   # index 5
+        self.stack.addWidget(self.mutual_pr)         # index 6
         content_col.addWidget(self.stack, 1)
 
         content_wrap = QWidget()
@@ -173,6 +177,7 @@ class MainWindow(QMainWindow):
         self.side.set_channels(self.store.list())
         self.folder_stat.refresh()
         self.content_quality.refresh()
+        self.mutual_pr.refresh()
 
     def _on_folders_changed(self) -> None:
         # Folder OR tag list/assignments changed, from the Config screen,
@@ -185,6 +190,7 @@ class MainWindow(QMainWindow):
         self.config_view.refresh_tags_list()
         self.folder_stat.refresh()
         self.content_quality.refresh()
+        self.mutual_pr.refresh()
         if self._current_key:
             self.dashboard.refresh_folder_button()
             self.dashboard.refresh_tag_button()
@@ -216,6 +222,12 @@ class MainWindow(QMainWindow):
         self.side.select_content_quality()
         self.content_quality.refresh()
         self.stack.setCurrentWidget(self.content_quality)
+
+    def _show_mutual_pr(self) -> None:
+        self._current_key = None
+        self.side.select_mutual_pr()
+        self.mutual_pr.refresh()
+        self.stack.setCurrentWidget(self.mutual_pr)
 
     def _show_channel(self, key: str) -> None:
         data = self.store.load(key)
@@ -303,6 +315,7 @@ class MainWindow(QMainWindow):
         self.folder_stat.retranslate()
         self.compare_charts.retranslate()
         self.content_quality.retranslate()
+        self.mutual_pr.retranslate()
         self.unfold_btn.setToolTip(self.i18n.tr("nav_unfold_hint"))
 
     # --------------------------------------------------------------- theme

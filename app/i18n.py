@@ -132,6 +132,29 @@ EN = {
     "col_rating": "Rating",
     "col_post_quality": "Post Quality",
     "folder_stat_period_empty": "No posts found for this folder.",
+    # mutual pr view
+    "nav_mutual_pr": "🤝 Mutual PR",
+    "mutual_pr_sub": "Compare tracked channels for ad-swaps: reach, quality, "
+                     "and an estimated follower-gain forecast per ad post.",
+    "mutual_pr_hint": "The forecast and best-days columns are estimates, not "
+                      "measurements — this app has no real ad-campaign outcome "
+                      "data. They factor in each channel's recent content "
+                      "quality, itself only as complete as each checkpoint's "
+                      "stored post sample for the last ~6 months, plus a fixed "
+                      "view-accumulation curve and reach-to-follower conversion "
+                      "rate (see app.scoring_pr). Treat these as a starting "
+                      "point for a conversation, not a guarantee.",
+    "mutual_pr_pick_folder": "Folder:",
+    "mutual_pr_all_channels": "All channels",
+    "mutual_pr_empty": "No channels tracked yet — fetch one from the Config screen.",
+    "col_followers": "Followers",
+    "col_forecast_24h": "24h forecast",
+    "col_repeated_after_month": "Repeated after Month",
+    "col_forecast_48h": "48h forecast",
+    "col_forecast_72h": "72h forecast",
+    "col_forecast_week": "Week forecast",
+    "col_forecast_month": "Month forecast",
+    "col_best_days": "Best days to post",
     # high-quality posts view
     "nav_content_quality": "🎯 High-Quality Posts",
     "cqi_fetch_media": "🖼 Fetch media",
@@ -508,6 +531,32 @@ RU = {
     "col_rating": "Рейтинг",
     "col_post_quality": "Качество постов",
     "folder_stat_period_empty": "Постов в этой папке не найдено.",
+    # mutual pr view
+    "nav_mutual_pr": "🤝 Взаимопиар",
+    "mutual_pr_sub": "Сравнение отслеживаемых каналов для взаимопиара: охват, "
+                     "качество и оценка прироста подписчиков от рекламного поста.",
+    "mutual_pr_hint": "Колонки прогноза и лучших дней — это оценки, а не "
+                      "измерения: в приложении нет реальных данных об "
+                      "исходах рекламных кампаний. Они учитывают качество "
+                      "недавнего контента канала, которое считается только "
+                      "по тому объёму постов за последние ~6 месяцев, что "
+                      "сохранён в checkpoint'е, плюс фиксированную кривую "
+                      "набора просмотров и условный коэффициент конверсии "
+                      "охвата в подписчиков (см. app.scoring_pr). "
+                      "Воспринимайте их как повод для разговора, а не как "
+                      "гарантию.",
+    "mutual_pr_pick_folder": "Папка:",
+    "mutual_pr_all_channels": "Все каналы",
+    "mutual_pr_empty": "Пока нет отслеживаемых каналов — соберите канал на "
+                       "экране настроек.",
+    "col_followers": "Подписчики",
+    "col_forecast_24h": "Прогноз 24ч",
+    "col_repeated_after_month": "Повтор через месяц",
+    "col_forecast_48h": "Прогноз 48ч",
+    "col_forecast_72h": "Прогноз 72ч",
+    "col_forecast_week": "Прогноз неделя",
+    "col_forecast_month": "Прогноз месяц",
+    "col_best_days": "Лучшие дни для поста",
     # high-quality posts view
     "nav_content_quality": "🎯 Лучшие посты",
     "cqi_fetch_media": "🖼 Загрузить медиа",

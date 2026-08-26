@@ -31,6 +31,7 @@ class SidePanel(QFrame):
     config_selected = Signal()
     folder_stat_selected = Signal()
     content_quality_selected = Signal()
+    mutual_pr_selected = Signal()
     channel_selected = Signal(str)   # checkpoint key
     compare_requested = Signal(list)  # 2-8 checkpoint keys
     compare_mode_off = Signal()
@@ -139,6 +140,14 @@ class SidePanel(QFrame):
         self.content_quality_btn.clicked.connect(lambda: self.content_quality_selected.emit())
         self.group.addButton(self.content_quality_btn)
         root.addWidget(_bordered(self.content_quality_btn))
+        root.addSpacing(4)
+
+        self.mutual_pr_btn = NavButton(None, i18n.tr("nav_mutual_pr"))
+        self.mutual_pr_btn.setMinimumHeight(36)
+        self.mutual_pr_btn.setStyleSheet("padding: 4px 0px; border: none;")
+        self.mutual_pr_btn.clicked.connect(lambda: self.mutual_pr_selected.emit())
+        self.group.addButton(self.mutual_pr_btn)
+        root.addWidget(_bordered(self.mutual_pr_btn))
         root.addSpacing(4)
 
         # Compare Charts + Compare Metrics share one row — neither is part of
@@ -445,6 +454,9 @@ class SidePanel(QFrame):
     def select_content_quality(self) -> None:
         self.content_quality_btn.setChecked(True)
 
+    def select_mutual_pr(self) -> None:
+        self.mutual_pr_btn.setChecked(True)
+
     def select_channel(self, key: str) -> None:
         btn = self._channel_btns.get(key)
         if btn:
@@ -460,6 +472,7 @@ class SidePanel(QFrame):
         self.config_btn.set_text(self.i18n.tr("nav_config"))
         self.folder_stat_btn.set_text(self.i18n.tr("nav_folder_stat"))
         self.content_quality_btn.set_text(self.i18n.tr("nav_content_quality"))
+        self.mutual_pr_btn.set_text(self.i18n.tr("nav_mutual_pr"))
         self.empty_lbl.setText(self.i18n.tr("nav_no_channels"))
         self.compare_btn.setText(self.i18n.tr("nav_compare"))
         self.compare_btn.setToolTip(self.i18n.tr("nav_compare_hint"))
