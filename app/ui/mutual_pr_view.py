@@ -28,7 +28,9 @@ from PySide6.QtWidgets import (
 )
 
 from ..folders import FolderStore
-from ..scoring_pr import ad_forecast, best_days, channel_interest, repeated_post_forecast
+from ..scoring_pr import (
+    ad_forecast, best_days, channel_interest, recent_settled_views, repeated_post_forecast,
+)
 from ..store import ChannelStore
 from .dashboard_view import fmt_int
 from .theme import COLORS
@@ -37,6 +39,8 @@ from .widgets import SectionCard, hline
 # Forecast columns after the Repeated-after-Month column, in table order.
 _FORECAST_COLS = ["48h", "72h", "week", "month"]
 _WD_KEYS = ["wd_mon", "wd_tue", "wd_wed", "wd_thu", "wd_fri", "wd_sat", "wd_sun"]
+# weekday index 0=Mon..6=Sun -> emoji, grouped Mon-Tue / Wed-Thu / Fri / Sat-Sun.
+_WD_EMOJI = ["🚀", "🚀", "⚖️", "⚖️", "🎉", "☀️", "☀️"]
 _TITLE_MAX_CHARS = 24
 _TITLE_COL_WIDTH = 170
 _FOLLOWERS_COL = 0
@@ -47,6 +51,8 @@ _FORECAST_START_COL = 4   # 48h onward, see _FORECAST_COLS
 _TINTED_COL = _COL_24H
 _BEST_DAYS_COL = 8
 _BEST_DAYS_COL_WIDTH = 190   # fits e.g. "Wed(x1.58), Thu(x1.42)" without eliding
+_FORECAST_COL_WIDTH = 120   # 20% wider than Qt's 100px default, on request
+_FORECAST_TABLE_COLS = (_COL_24H, _COL_REPEATED, 4, 5, 6, 7)
 
 # col index -> sortable (Best days isn't a single scalar).
 _SORTABLE_COLS = {0, 1, 2, 3, 4, 5, 6, 7}
@@ -150,6 +156,8 @@ class MutualPrView(QWidget):
         header.setSectionResizeMode(_TITLE_COL, QHeaderView.ResizeMode.Interactive)
         self.table.setColumnWidth(_TITLE_COL, _TITLE_COL_WIDTH)
         self.table.setColumnWidth(_BEST_DAYS_COL, _BEST_DAYS_COL_WIDTH)
+        for col in _FORECAST_TABLE_COLS:
+            self.table.setColumnWidth(col, _FORECAST_COL_WIDTH)
         header.setSectionsClickable(True)
         header.sectionClicked.connect(self._on_header_clicked)
         self.table.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
@@ -201,8 +209,10 @@ class MutualPrView(QWidget):
             avg_views_settled = float(stats.get("avg_views_settled", 0) or 0)
             avg_posts_per_day = float(stats.get("avg_posts_per_day", 0) or 0)
             weekday_counts = data.get("distributions", {}).get("weekday") or [0] * 7
-            interest = channel_interest(data.get("rows", []) or [], avg_views)
-            forecast = ad_forecast(avg_views_settled, interest, avg_posts_per_day)
+            rows = data.get("rows", []) or []
+            interest = channel_interest(rows, avg_views)
+            month_views = recent_settled_views(rows)
+            forecast = ad_forecast(avg_views_settled, interest, avg_posts_per_day, month_views)
             self._entries.append({
                 "channel": data,
                 "folder_id": self.folder_store.folder_for_channel(data["key"]),
@@ -267,8 +277,8 @@ class MutualPrView(QWidget):
                 item = QTableWidgetItem(fmt_int(round(entry["forecast"][horizon])))
                 self.table.setItem(i, _FORECAST_START_COL + j, item)
 
-            days_label = ", ".join(f"{self.tr_(_WD_KEYS[d])}({_fmt_rate_pct(r)})"
-                                   for d, r in entry["best_days"])
+            days_label = " ".join(f"{_WD_EMOJI[d]}{self.tr_(_WD_KEYS[d])}({_fmt_rate_pct(r)})"
+                                  for d, r in entry["best_days"])
             self.table.setItem(i, _BEST_DAYS_COL, QTableWidgetItem(days_label))
 
         order = Qt.SortOrder.DescendingOrder if self._sort_desc else Qt.SortOrder.AscendingOrder

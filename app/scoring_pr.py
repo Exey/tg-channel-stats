@@ -33,7 +33,7 @@ once real ad-swap outcomes are available to calibrate against.
 """
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from .periods import year_window_cutoff
 from .scoring import post_gauge_value, post_score_raw
@@ -50,6 +50,18 @@ AD_VIEW_CURVE: dict[str, float] = {
 
 FOLLOW_CONVERSION_BASE = 0.02   # see module docstring
 INTEREST_WEIGHT = 1.2   # 20% bump on request — see follow_conversion_rate
+# 24h specifically leans on quality twice as hard as the shared weighting
+# — see follow_conversion_rate_24h. An immediate reaction is a much closer
+# read of real engagement than raw reach/follower count is; that's a
+# 24h-specific distinction, not a reason to change the other horizons,
+# where cumulative audience size legitimately matters more.
+INTEREST_WEIGHT_24H = INTEREST_WEIGHT * 2
+
+# Recent-history window (days ago) averaged for the month forecast's reach
+# basis instead of the whole-history avg_views_settled — see
+# recent_settled_views.
+MONTH_BASIS_DAYS_FROM = 30
+MONTH_BASIS_DAYS_TO = 60
 
 # Posts-in-between at which a repeat ad post's retention has decayed to
 # half — see repeated_post_forecast. 16 is chosen so a channel posting at
@@ -113,6 +125,32 @@ def follow_conversion_rate(interest_gauge: float,
     return base * (0.5 + INTEREST_WEIGHT * interest_gauge / 1000)
 
 
+def follow_conversion_rate_24h(interest_gauge: float,
+                               base: float = FOLLOW_CONVERSION_BASE) -> float:
+    """Like follow_conversion_rate, but for the 24h forecast specifically —
+    scaled 0.5x-2.9x instead of 0.5x-1.7x (INTEREST_WEIGHT_24H) — see its
+    definition."""
+    return base * (0.5 + INTEREST_WEIGHT_24H * interest_gauge / 1000)
+
+
+def recent_settled_views(rows: list[dict], days_from: int = MONTH_BASIS_DAYS_FROM,
+                         days_to: int = MONTH_BASIS_DAYS_TO) -> float | None:
+    """Average views of posts dated between `days_from` and `days_to` days
+    ago — well past app.tools.channel_stat's own 14-day settle point, but
+    recent enough to reflect how the channel performs *now* rather than
+    however far back its full fetch history goes. Grounds the month
+    forecast in this real, recent sample instead of avg_views_settled's
+    whole-history average. None if no post falls in that window (e.g. a
+    rare poster with nothing in this specific slice) — ad_forecast falls
+    back to avg_views_settled in that case."""
+    hi = datetime.now().astimezone() - timedelta(days=days_from)
+    lo = datetime.now().astimezone() - timedelta(days=days_to)
+    windowed = [r for r in rows if (dt := _parse_date(r.get("date", ""))) and lo <= dt <= hi]
+    if not windowed:
+        return None
+    return sum(int(r.get("views", 0) or 0) for r in windowed) / len(windowed)
+
+
 def rare_posting_penalty(avg_posts_per_day: float,
                          reference: float = REFERENCE_POSTS_PER_DAY) -> float:
     """0-1 factor cutting the 24h forecast for a channel that posts less
@@ -146,17 +184,28 @@ def rare_posting_boost(horizon: str, avg_posts_per_day: float,
 
 
 def ad_forecast(avg_views_settled: float, interest_gauge: float,
-                avg_posts_per_day: float) -> dict[str, float]:
+                avg_posts_per_day: float,
+                month_views: float | None = None) -> dict[str, float]:
     """Estimated *new followers* gained by each horizon after an ad post —
     avg_views_settled × that horizon's AD_VIEW_CURVE fraction ×
-    follow_conversion_rate, with the 24h figure further cut by
-    rare_posting_penalty and every later horizon boosted by
-    rare_posting_boost. See module docstring for why these are documented
-    assumptions rather than measured curves."""
+    follow_conversion_rate, with three adjustments:
+      - 24h uses follow_conversion_rate_24h (leans harder on quality) and
+        is further cut by rare_posting_penalty.
+      - month uses `month_views` (see recent_settled_views) as its reach
+        basis instead of avg_views_settled, when the caller has one —
+        real recent posts beat a whole-history average for "what would a
+        post today actually settle at."
+      - every horizon past 24h is boosted by rare_posting_boost.
+    See module docstring for why these are documented assumptions rather
+    than measured curves."""
     rate = follow_conversion_rate(interest_gauge)
     forecast = {horizon: avg_views_settled * fraction * rate
                for horizon, fraction in AD_VIEW_CURVE.items()}
-    forecast["24h"] *= rare_posting_penalty(avg_posts_per_day)
+    forecast["24h"] = (avg_views_settled * AD_VIEW_CURVE["24h"]
+                       * follow_conversion_rate_24h(interest_gauge)
+                       * rare_posting_penalty(avg_posts_per_day))
+    if month_views is not None:
+        forecast["month"] = month_views * AD_VIEW_CURVE["month"] * rate
     for horizon in RARE_POSTING_BOOST_MAX:
         forecast[horizon] *= rare_posting_boost(horizon, avg_posts_per_day)
     return forecast
