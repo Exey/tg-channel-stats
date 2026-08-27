@@ -20,25 +20,82 @@ calibrated against real ad-swap results:
         per-channel view-age data exists to calibrate it per channel.
     FOLLOW_CONVERSION_BASE: assumed fraction of a post's reach that converts
         into a new follower for an *ad* post specifically (as opposed to the
-        channel's own organic content) — 2%, a commonly-cited but unverified
-        Telegram ad rule of thumb, scaled by the channel's own content
+        channel's own organic content), scaled by the channel's own content
         quality (see follow_conversion_rate) since a channel that engages
         its own audience well presumably also converts outside traffic
-        better. The quality term's weight in that scaling was bumped 20%
-        (1.0x -> 1.2x) on request, widening how much a channel's Interest
-        can swing its conversion rate.
+        better — but only mildly (INTEREST_WEIGHT is deliberately small):
+        calibrated against two channels with real known ad-swap outcomes,
+        reach (avg_views_settled) alone already predicted their ~2-3x gap
+        almost exactly (2.63x raw reach ratio vs. a stated real ~2-3x
+        follower-gain ratio), despite one having much lower measured
+        content quality than the other. Quality still nudges the estimate,
+        it just isn't allowed to fight a clear reach difference the way an
+        earlier, much larger weight (plus an added virality multiplier)
+        did — that combination crushed a 2.63x-reach channel down to near
+        parity with a smaller one, which is what prompted this recalibration.
 
-Both are ordinary module constants specifically so they're easy to retune
-once real ad-swap outcomes are available to calibrate against.
+These are ordinary module constants specifically so they're easy to retune
+once real ad-swap outcomes are available to calibrate against — logging
+what an actual ad-swap post does (follower count before, then at 24h/48h/
+week/month) is the real fix, not anything below; there's currently no
+pipeline for that, so everything here stays a heuristic in the meantime.
+
+Reach (avg_views_settled) is used directly and unmodified as the forecast's
+total-reach basis — not blended or capped against a shorter, noisier recent
+window. An earlier version tried grounding the "month" figure in a 30-60-
+day-old post sample specifically, but that window is small enough (a
+handful of posts, fewer for an infrequent poster) that a single big post
+landing in it could double the estimate; avg_views_settled, averaged over
+a channel's entire settled history, doesn't have that problem and needs no
+compensating cap to fix it.
+
+Per-horizon adjustments (currently just a rare-posting channel's post
+lingering un-buried and so gathering reach more gradually) are applied as
+REDISTRIBUTION of one fixed total across AD_VIEW_CURVE's fractions, not as
+independent per-horizon multipliers — see ad_forecast. An earlier version
+also tilted 24h's fraction toward 48h's by content quality, independently
+scaled 24h's own conversion rate harder than the other horizons', which
+could (and on real checkpoints, did) let the 24h figure exceed the 48h one
+— a cumulative-forecast ordering that makes no sense regardless of what
+the constants get tuned to. Redistributing a fixed total is what makes
+that impossible by construction rather than by clamping after the fact:
+month's fraction is always exactly 1.0 (that's its definition — "all of
+it has landed"), and every earlier fraction is built by shrinking toward
+0, never past its own next-larger neighbor.
+
+ad_forecast_range() reports a low/high band alongside the point estimate
+— a crude, honestly-labeled uncertainty range (not a fitted statistical
+interval, since there's no outcome data yet to fit one against) reflecting
+the two dominant unverified constants above.
 """
 from __future__ import annotations
 
-from datetime import datetime, timedelta
+import re
+from datetime import datetime
 
 from .periods import year_window_cutoff
 from .scoring import post_gauge_value, post_score_raw
 
-INTEREST_WINDOW_DAYS = 182   # "last ~6 months" — see channel_interest
+# Link-detection regexes adapted from tg-super-admin's app/tools/
+# links_compare.py (LINK_RE / MENTION_RE / GENERIC_URL_RE) — that tool
+# scans live Telethon messages for cross-channel links, this one scans
+# this app's own already-stored post text, so the patterns are copied in
+# rather than imported across the two separate projects.
+# t.me/ links, with or without an "https://" scheme — a bare "t.me/name"
+# mention counts exactly the same as a fully-qualified one.
+_TME_LINK_RE = re.compile(r"(?<![\w.])(?:https?://)?t\.me/[A-Za-z0-9_+/-]{1,80}",
+                          re.IGNORECASE)
+# Bare @mentions (Telegram usernames are 5-32 chars, start with a letter);
+# `(?<![\w@])` avoids matching the local part of an email address.
+_MENTION_RE = re.compile(r"(?<![\w@])@[A-Za-z][A-Za-z0-9_]{3,31}\b")
+# Any http(s) URL that *isn't* a t.me link — external/ad-style links.
+_EXTERNAL_URL_RE = re.compile(
+    r"(?<![\w])https?://(?!(?:www\.)?t\.me/)[^\s<>\)\]]+", re.IGNORECASE)
+
+# "Last ~3 months" — narrowed from 6 on request, since more recent posts
+# are a more relevant read of current audience interest than a
+# half-year-old average.
+INTEREST_WINDOW_DAYS = 90
 
 # Fraction of a post's eventual (settled) reach assumed to have landed by
 # each horizon — see module docstring. 24h trimmed to 82% of its original
@@ -48,20 +105,69 @@ AD_VIEW_CURVE: dict[str, float] = {
     "24h": 0.49, "48h": 0.75, "72h": 0.78, "week": 0.80, "month": 1.00,
 }
 
-FOLLOW_CONVERSION_BASE = 0.02   # see module docstring
-INTEREST_WEIGHT = 1.2   # 20% bump on request — see follow_conversion_rate
-# 24h specifically leans on quality twice as hard as the shared weighting
-# — see follow_conversion_rate_24h. An immediate reaction is a much closer
-# read of real engagement than raw reach/follower count is; that's a
-# 24h-specific distinction, not a reason to change the other horizons,
-# where cumulative audience size legitimately matters more.
-INTEREST_WEIGHT_24H = INTEREST_WEIGHT * 2
+# Calibrated together against two channels with real known ad-swap
+# outcomes (see module docstring): BASE alone (at INTEREST_WEIGHT's
+# midpoint multiplier) reproduces the higher-quality channel's known
+# ~200-250-in-24h figure almost exactly, and the resulting *small*
+# INTEREST_WEIGHT swing (0.5x-0.8x, not the 0.5x-1.7x an earlier version
+# used) still lets the lower-quality-but-much-bigger-reach channel land at
+# ~2.25x that figure — inside the real ~2-3x gap the user reported between
+# them, which a heavier quality weight (plus a now-removed extra virality
+# multiplier) had been crushing down toward parity.
+FOLLOW_CONVERSION_BASE = 0.036
+INTEREST_WEIGHT = 0.3   # see follow_conversion_rate
 
-# Recent-history window (days ago) averaged for the month forecast's reach
-# basis instead of the whole-history avg_views_settled — see
-# recent_settled_views.
-MONTH_BASIS_DAYS_FROM = 30
-MONTH_BASIS_DAYS_TO = 60
+# INTEREST_WEIGHT is boosted within this follower range (see
+# size_band_factor) — quality reads as a more reliable predictor for a
+# channel this size than for a much bigger one, per a real known channel
+# in this range whose actual ad-swap follower gain the base weight alone
+# couldn't reach even at max interest_gauge (a 6300-avg-view channel with
+# middling quality has a real ~100-in-24h/~250-300-in-month outcome; the
+# unweighted formula topped out under 100 no matter how high interest_gauge
+# went, since INTEREST_WEIGHT only swings the rate 0.5x-0.8x). Matching
+# that channel's number *exactly* would need roughly a 7.6x weight
+# multiplier just for it — implausibly large from one data point, and it
+# would swing every other channel in this same band (verified against two,
+# neither with a real target of its own) by a similar amount. SIZE_BAND_
+# BOOST below is a deliberately more conservative 3x instead: real
+# movement in the right direction without betting this much on a single
+# approximate figure.
+SIZE_BAND_LOW = 5_000
+SIZE_BAND_HIGH = 30_000
+SIZE_BAND_MARGIN = 5_000   # linear taper width outside [LOW, HIGH]
+SIZE_BAND_BOOST = 3.0
+
+# avg_views_settled capped at followers × this ratio (see reach_basis) — a
+# real, otherwise-large-reach channel in this app's own tracked data has
+# avg_views_settled at 1.9x its own follower count, the only one of five
+# checked channels to exceed 1.0x by any real margin. Views beyond a
+# channel's own subscriber base reflect external/viral discovery (public
+# forwarding, Telegram's own recommendation surfacing older posts over
+# months) that a freshly-placed ad post wouldn't automatically inherit —
+# so left uncapped, that channel's forecast came out several times its own
+# real known ~100-200-in-24h range even with every other lever at its
+# floor. 1.0 leaves any channel whose average is still within its own
+# subscriber count (the other four checked) completely untouched.
+VIEWS_PER_FOLLOWER_CAP = 1.0
+
+# Extra credit within the SIZE_BAND (see size_band_factor) for a channel
+# that produces genuine breakout hits often — stats.viral_post_share, not
+# channel_interest's average-engagement-rate gauge — gated off whenever
+# VIEWS_PER_FOLLOWER_CAP already reduced that channel's reach basis, so a
+# channel whose virality already shows up as a capped, oversized
+# avg_views_settled doesn't get credited for the same thing twice.
+# WEIGHT recalibrated down from an original 1.5 on request — a real
+# ~11K-follower channel at a fairly ordinary 4.0% viral share (this app's
+# real p90 is ~4.8%, so not actually an outlier) was hitting near the full
+# multiplier on top of SIZE_BAND's own 3x quality boost, more than
+# doubling its forecast versus the same figure with viral_boost left out
+# entirely — a compounding nobody asked for. Re-solved instead from the
+# one real target this module has for a *partial* multiplier (a known
+# channel's own figure needed to come down ~10-20% from what WEIGHT=1.5
+# gave it), which incidentally also brings the ~11K-follower channel back
+# down close to what its reach and quality alone would already predict.
+VIRAL_BOOST_WEIGHT = 1.07
+VIRAL_BOOST_SATURATE_PCT = 3.0
 
 # Posts-in-between at which a repeat ad post's retention has decayed to
 # half — see repeated_post_forecast. 16 is chosen so a channel posting at
@@ -71,16 +177,64 @@ MONTH_BASIS_DAYS_TO = 60
 REPEAT_DECAY_POSTS_K = 16
 
 # This app's real median avg_posts_per_day across its own tracked
-# checkpoints — see rare_posting_penalty.
+# checkpoints — see rarity().
 REFERENCE_POSTS_PER_DAY = 0.525
 
-# Max extra credit a rare poster's lingering, un-buried visibility earns at
-# each horizon beyond 24h — see rare_posting_boost. Week and month get
-# noticeably more than 48h/72h since that advantage compounds the longer
-# the post has had to keep collecting views nobody buried.
-RARE_POSTING_BOOST_MAX: dict[str, float] = {
-    "48h": 0.15, "72h": 0.25, "week": 0.40, "month": 0.60,
+# rarity() alone (linear in avg_posts_per_day) barely told apart a channel
+# posting every ~4-5 days from one posting only every ~7-8 days — 0.581 vs
+# 0.752, not a wide gap — even though the real "how buried does this post
+# get" dynamic differs more sharply out at that extreme. Squaring widens
+# it (0.338 vs 0.566) without moving the moderate case much, so
+# RARE_POSTING_SHRINK_MAX below could be rescaled to keep moderate
+# rare-posters where they already looked right while genuinely-rare ones
+# (e.g. one real ~25K-follower, 0.13-posts/day channel forecasting a
+# visibly-too-fast 24h figure relative to its own actual slow, gradual
+# view accumulation) shrink further. See _rarity_curve.
+RARITY_CURVE_EXPONENT = 2
+
+# Max fraction shrunk out of each early horizon (and implicitly pushed
+# later, since month's fraction is fixed at 1.0 — see _rarity_curve) for a
+# channel posting far below REFERENCE_POSTS_PER_DAY: its post lingers
+# un-buried by a next one, so its audience discovers it more gradually
+# instead of mostly in the first day or two. Decreasing across horizons —
+# 24h shrinks the most, week the least — is what keeps the curve
+# monotonically increasing for every rarity value (verified numerically
+# at 0.001 resolution across the full [0,1] range, not just spot-checked).
+# Rescaled up from a flat halving (0.40/0.28/0.23/0.15) to compensate for
+# RARITY_CURVE_EXPONENT making every rarity value smaller.
+RARE_POSTING_SHRINK_MAX: dict[str, float] = {
+    "24h": 0.69, "48h": 0.48, "72h": 0.40, "week": 0.26,
 }
+
+# Below this many total stored posts, rarity()'s redistribution effect is
+# scaled down proportionally — a channel with only a handful of posts
+# hasn't given avg_posts_per_day enough evidence to justify reshaping its
+# whole curve on it. See _data_quality_factor.
+DATA_QUALITY_MIN_POSTS = 20
+
+# Crude low/high multipliers on the point estimate — see ad_forecast_range
+# and the module docstring. Derived by combining this module's two named
+# unverified ranges: FOLLOW_CONVERSION_BASE's own plausible +-50% (still
+# just a single calibration point, not a fitted distribution) with a
+# further +-20% for AD_VIEW_CURVE's shape (derived from a single channel's
+# own observed performance).
+FORECAST_LOW_MULT = 0.5 * 0.8
+FORECAST_HIGH_MULT = 1.5 * 1.2
+
+# A post name-dropping 1-MENTION_LINK_MAX_COUNT other channels (a t.me/ or
+# @mention link) reads as genuine single-mention cross-promotion — the
+# behavior this whole view exists to find — and earns up to
+# MENTION_LINK_BONUS_MAX extra on the forecast. More than that in one post
+# reads as a directory/link-dump post instead, not real cross-promotion,
+# and earns nothing. A post with EXTERNAL_LINK_MIN_COUNT+ non-t.me https://
+# links reads as ad/spam behavior instead, cut by up to
+# EXTERNAL_LINK_PENALTY_MAX. Both are shares across every stored post (see
+# link_behavior_factor), so a channel that does this rarely barely moves
+# either number.
+MENTION_LINK_MAX_COUNT = 3
+MENTION_LINK_BONUS_MAX = 0.05
+EXTERNAL_LINK_MIN_COUNT = 2
+EXTERNAL_LINK_PENALTY_MAX = 0.05
 
 # How much of a "best day"'s raw deviation from an average day survives
 # into its displayed rate — see best_days. 1.0 (no damping) produced
@@ -117,98 +271,154 @@ def channel_interest(rows: list[dict], avg_views: float,
     return sum(scores) / len(scores)
 
 
-def follow_conversion_rate(interest_gauge: float,
+def size_band_factor(followers: int, low: int = SIZE_BAND_LOW, high: int = SIZE_BAND_HIGH,
+                     margin: int = SIZE_BAND_MARGIN, boost: float = SIZE_BAND_BOOST) -> float:
+    """1.0 outside [low-margin, high+margin], `boost` flat across
+    [low, high], linearly tapering between — see SIZE_BAND_BOOST."""
+    if followers <= low - margin or followers >= high + margin:
+        return 1.0
+    if low <= followers <= high:
+        return boost
+    if followers < low:
+        t = (followers - (low - margin)) / margin
+    else:
+        t = ((high + margin) - followers) / margin
+    return 1.0 + (boost - 1.0) * t
+
+
+def follow_conversion_rate(interest_gauge: float, followers: int = 0,
                            base: float = FOLLOW_CONVERSION_BASE) -> float:
     """Assumed reach-to-new-follower conversion rate for an ad post, scaled
-    0.5x-1.7x the base rate by the channel's own content quality (0-1000
-    gauge, weighted by INTEREST_WEIGHT) — see module docstring."""
-    return base * (0.5 + INTEREST_WEIGHT * interest_gauge / 1000)
+    0.5x-0.8x the base rate by the channel's own content quality (0-1000
+    gauge, weighted by INTEREST_WEIGHT — deliberately a narrow swing, not a
+    dominant one, see module docstring for why) — with that weight further
+    boosted by size_band_factor(followers) for a channel in the 5K-30K
+    follower range, where quality reads as a more reliable predictor."""
+    weight = INTEREST_WEIGHT * size_band_factor(followers)
+    return base * (0.5 + weight * interest_gauge / 1000)
 
 
-def follow_conversion_rate_24h(interest_gauge: float,
-                               base: float = FOLLOW_CONVERSION_BASE) -> float:
-    """Like follow_conversion_rate, but for the 24h forecast specifically —
-    scaled 0.5x-2.9x instead of 0.5x-1.7x (INTEREST_WEIGHT_24H) — see its
-    definition."""
-    return base * (0.5 + INTEREST_WEIGHT_24H * interest_gauge / 1000)
+def reach_basis(avg_views_settled: float, followers: int,
+                cap_mult: float = VIEWS_PER_FOLLOWER_CAP) -> tuple[float, bool]:
+    """(reach, was_capped) — avg_views_settled, capped at followers ×
+    cap_mult — see VIEWS_PER_FOLLOWER_CAP."""
+    if followers <= 0:
+        return avg_views_settled, False
+    cap = followers * cap_mult
+    if avg_views_settled > cap:
+        return cap, True
+    return avg_views_settled, False
 
 
-def recent_settled_views(rows: list[dict], days_from: int = MONTH_BASIS_DAYS_FROM,
-                         days_to: int = MONTH_BASIS_DAYS_TO) -> float | None:
-    """Average views of posts dated between `days_from` and `days_to` days
-    ago — well past app.tools.channel_stat's own 14-day settle point, but
-    recent enough to reflect how the channel performs *now* rather than
-    however far back its full fetch history goes. Grounds the month
-    forecast in this real, recent sample instead of avg_views_settled's
-    whole-history average. None if no post falls in that window (e.g. a
-    rare poster with nothing in this specific slice) — ad_forecast falls
-    back to avg_views_settled in that case."""
-    hi = datetime.now().astimezone() - timedelta(days=days_from)
-    lo = datetime.now().astimezone() - timedelta(days=days_to)
-    windowed = [r for r in rows if (dt := _parse_date(r.get("date", ""))) and lo <= dt <= hi]
-    if not windowed:
-        return None
-    return sum(int(r.get("views", 0) or 0) for r in windowed) / len(windowed)
-
-
-def rare_posting_penalty(avg_posts_per_day: float,
-                         reference: float = REFERENCE_POSTS_PER_DAY) -> float:
-    """0-1 factor cutting the 24h forecast for a channel that posts less
-    often than REFERENCE_POSTS_PER_DAY (this app's real median). AD_VIEW_
-    CURVE's 24h fraction assumes a post gets "buried" by the channel's own
-    next post within a day or so, the normal case that pushes most of its
-    eventual views into that first day. A rarely-posting channel's post
-    instead stays at the top with nothing superseding it for days or
-    weeks, so its audience keeps discovering it gradually over a much
-    longer real timeline — the flat 24h fraction overstates that first day
-    for such a channel. 1.0 (no penalty) at or above the reference
-    frequency, scaling down proportionally below it."""
-    if reference <= 0:
+def viral_boost(viral_post_share: float, followers: int, was_capped: bool) -> float:
+    """>=1 multiplier from stats.viral_post_share — only within SIZE_BAND,
+    and only when reach_basis() didn't already cap this channel's reach
+    (see VIRAL_BOOST_WEIGHT for why that double-counting is skipped)."""
+    if was_capped or size_band_factor(followers) <= 1.0:
         return 1.0
-    return min(1.0, avg_posts_per_day / reference)
+    share = max(0.0, viral_post_share)
+    return 1 + VIRAL_BOOST_WEIGHT * min(1.0, share / VIRAL_BOOST_SATURATE_PCT)
 
 
-def rare_posting_boost(horizon: str, avg_posts_per_day: float,
-                       reference: float = REFERENCE_POSTS_PER_DAY) -> float:
-    """>=1 factor boosting the 48h/72h/week/month forecast for a channel
-    that posts less often than `reference` — the flip side of
-    rare_posting_penalty's own reasoning: the same lack of a next post
-    burying this one means it keeps collecting views from an audience that
-    discovers it gradually, so by the time the longer horizons roll
-    around a rare poster's post should be *ahead* of what the flat curve
-    assumes for a typically-active channel, not just spared the 24h
-    penalty. Scales linearly from 1.0 (no boost) at/above `reference` up
-    to `1 + RARE_POSTING_BOOST_MAX[horizon]` as avg_posts_per_day -> 0."""
-    rarity = 1 - rare_posting_penalty(avg_posts_per_day, reference)
-    return 1 + RARE_POSTING_BOOST_MAX[horizon] * rarity
+def rarity(avg_posts_per_day: float, reference: float = REFERENCE_POSTS_PER_DAY) -> float:
+    """0 (posting at/above `reference`) to just under 1 (posting far below
+    it) — how much a channel's posting frequency lags this app's real
+    median. AD_VIEW_CURVE's shape assumes a post gets "buried" by the
+    channel's own next post within a day or so, the normal case that
+    pushes most of its eventual reach into the earliest horizons. A
+    rarely-posting channel's post instead stays at the top with nothing
+    superseding it for days or weeks, so its audience keeps discovering it
+    gradually over a much longer real timeline. See _rarity_curve for how
+    this reshapes (not inflates) the forecast."""
+    if reference <= 0:
+        return 0.0
+    return 1 - min(1.0, avg_posts_per_day / reference)
+
+
+def _data_quality_factor(total_posts: int, minimum: int = DATA_QUALITY_MIN_POSTS) -> float:
+    """0-1 factor scaling down rarity()'s redistribution for a channel with
+    too few stored posts to trust avg_posts_per_day's estimate — 1.0 at or
+    above `minimum` total posts, down to 0 for a channel with none."""
+    if minimum <= 0:
+        return 1.0
+    return min(1.0, max(0, total_posts) / minimum)
+
+
+def _rarity_curve(avg_posts_per_day: float, total_posts: int) -> dict[str, float]:
+    """AD_VIEW_CURVE's fractions, redistributed (not inflated — month
+    always stays exactly 1.0) by posting rarity, raised to
+    RARITY_CURVE_EXPONENT to separate moderate from extreme rare-posters
+    (see its docstring). Monotonically increasing for every input by
+    construction — see RARE_POSTING_SHRINK_MAX's docstring for the proof
+    sketch."""
+    r = rarity(avg_posts_per_day) ** RARITY_CURVE_EXPONENT * _data_quality_factor(total_posts)
+    curve = dict(AD_VIEW_CURVE)
+    for horizon, shrink_max in RARE_POSTING_SHRINK_MAX.items():
+        curve[horizon] *= 1 - shrink_max * r
+    return curve
+
+
+def link_behavior_factor(rows: list[dict]) -> float:
+    """Multiplier applied across the whole forecast based on how the
+    channel actually links out in its posts — see the MENTION_LINK_*/
+    EXTERNAL_LINK_* constants above. 1.0 (no posts, or no links at all) up
+    to 1 + MENTION_LINK_BONUS_MAX for a channel that consistently
+    name-drops other channels, down to as low as 1 - EXTERNAL_LINK_
+    PENALTY_MAX for one that consistently posts external-link spam;
+    floored at 0 either way."""
+    posts = [r.get("full_text") or r.get("text") or "" for r in rows]
+    posts = [text for text in posts if text]
+    if not posts:
+        return 1.0
+    mention_qualifying = 0
+    external_heavy = 0
+    for text in posts:
+        mention_count = len(_TME_LINK_RE.findall(text)) + len(_MENTION_RE.findall(text))
+        if 1 <= mention_count <= MENTION_LINK_MAX_COUNT:
+            mention_qualifying += 1
+        if len(_EXTERNAL_URL_RE.findall(text)) >= EXTERNAL_LINK_MIN_COUNT:
+            external_heavy += 1
+    bonus = MENTION_LINK_BONUS_MAX * (mention_qualifying / len(posts))
+    penalty = EXTERNAL_LINK_PENALTY_MAX * (external_heavy / len(posts))
+    return max(0.0, 1 + bonus - penalty)
 
 
 def ad_forecast(avg_views_settled: float, interest_gauge: float,
-                avg_posts_per_day: float,
-                month_views: float | None = None) -> dict[str, float]:
-    """Estimated *new followers* gained by each horizon after an ad post —
-    avg_views_settled × that horizon's AD_VIEW_CURVE fraction ×
-    follow_conversion_rate, with three adjustments:
-      - 24h uses follow_conversion_rate_24h (leans harder on quality) and
-        is further cut by rare_posting_penalty.
-      - month uses `month_views` (see recent_settled_views) as its reach
-        basis instead of avg_views_settled, when the caller has one —
-        real recent posts beat a whole-history average for "what would a
-        post today actually settle at."
-      - every horizon past 24h is boosted by rare_posting_boost.
-    See module docstring for why these are documented assumptions rather
-    than measured curves."""
-    rate = follow_conversion_rate(interest_gauge)
-    forecast = {horizon: avg_views_settled * fraction * rate
-               for horizon, fraction in AD_VIEW_CURVE.items()}
-    forecast["24h"] = (avg_views_settled * AD_VIEW_CURVE["24h"]
-                       * follow_conversion_rate_24h(interest_gauge)
-                       * rare_posting_penalty(avg_posts_per_day))
-    if month_views is not None:
-        forecast["month"] = month_views * AD_VIEW_CURVE["month"] * rate
-    for horizon in RARE_POSTING_BOOST_MAX:
-        forecast[horizon] *= rare_posting_boost(horizon, avg_posts_per_day)
+                avg_posts_per_day: float, total_posts: int = 0,
+                followers: int = 0, viral_post_share: float = 0.0,
+                rows: list[dict] | None = None) -> dict[str, float]:
+    """Estimated *new followers* gained by each horizon after an ad post.
+
+    One fixed total — reach_basis(avg_views_settled, followers) ×
+    follow_conversion_rate(..., followers) × viral_boost(...) — is
+    multiplied out across `_rarity_curve`'s per-horizon fractions.
+    Posting-rarity reshapes *when* that fixed total arrives (see
+    _rarity_curve and the module docstring on why this is a
+    redistribution, not an independent per-horizon multiplier); month's
+    fraction is always exactly 1.0, so no horizon can ever forecast more
+    than the total itself. link_behavior_factor(rows), when the caller has
+    post text to check, is the one true multiplier on top — it reflects
+    the *content* of an ad post, not a reshaping of reach over time, so it
+    scales the whole curve evenly."""
+    reach, was_capped = reach_basis(avg_views_settled, followers)
+    rate = follow_conversion_rate(interest_gauge, followers)
+    boost = viral_boost(viral_post_share, followers, was_capped)
+    total = reach * rate * boost
+    curve = _rarity_curve(avg_posts_per_day, total_posts)
+    forecast = {horizon: total * fraction for horizon, fraction in curve.items()}
+    if rows is not None:
+        factor = link_behavior_factor(rows)
+        forecast = {horizon: value * factor for horizon, value in forecast.items()}
     return forecast
+
+
+def ad_forecast_range(forecast: dict[str, float]) -> dict[str, tuple[float, float]]:
+    """(low, high) for each horizon in `forecast` (see ad_forecast) — a
+    crude, honestly-labeled uncertainty band via FORECAST_LOW_MULT/
+    FORECAST_HIGH_MULT, not a statistically fitted interval (there's no
+    outcome data yet to fit one against — see module docstring)."""
+    return {horizon: (value * FORECAST_LOW_MULT, value * FORECAST_HIGH_MULT)
+           for horizon, value in forecast.items()}
 
 
 def repeated_post_forecast(forecast_24h: float, avg_posts_per_day: float,

@@ -140,16 +140,18 @@ EN = {
                       "measurements — this app has no real ad-campaign outcome "
                       "data. They factor in each channel's recent content "
                       "quality, itself only as complete as each checkpoint's "
-                      "stored post sample for the last ~6 months, plus a fixed "
+                      "stored post sample for the last ~3 months, plus a fixed "
                       "view-accumulation curve and reach-to-follower conversion "
                       "rate (see app.scoring_pr). Treat these as a starting "
                       "point for a conversation, not a guarantee.",
     "mutual_pr_pick_folder": "Folder:",
     "mutual_pr_all_channels": "All channels",
     "mutual_pr_empty": "No channels tracked yet — fetch one from the Config screen.",
+    "mutual_pr_range_tooltip": "Rough range: {low}–{high} (crude uncertainty band, "
+                               "not a fitted interval — see app.scoring_pr)",
     "col_followers": "Followers",
     "col_forecast_24h": "24h forecast",
-    "col_repeated_after_month": "Repeated after Month",
+    "col_repeated_after_month": "Repeat in Month",
     "col_forecast_48h": "48h forecast",
     "col_forecast_72h": "72h forecast",
     "col_forecast_week": "Week forecast",
@@ -539,7 +541,7 @@ RU = {
                       "измерения: в приложении нет реальных данных об "
                       "исходах рекламных кампаний. Они учитывают качество "
                       "недавнего контента канала, которое считается только "
-                      "по тому объёму постов за последние ~6 месяцев, что "
+                      "по тому объёму постов за последние ~3 месяца, что "
                       "сохранён в checkpoint'е, плюс фиксированную кривую "
                       "набора просмотров и условный коэффициент конверсии "
                       "охвата в подписчиков (см. app.scoring_pr). "
@@ -549,6 +551,9 @@ RU = {
     "mutual_pr_all_channels": "Все каналы",
     "mutual_pr_empty": "Пока нет отслеживаемых каналов — соберите канал на "
                        "экране настроек.",
+    "mutual_pr_range_tooltip": "Примерный диапазон: {low}–{high} (грубая оценка "
+                               "неопределённости, не статистический интервал — "
+                               "см. app.scoring_pr)",
     "col_followers": "Подписчики",
     "col_forecast_24h": "Прогноз 24ч",
     "col_repeated_after_month": "Повтор через месяц",
