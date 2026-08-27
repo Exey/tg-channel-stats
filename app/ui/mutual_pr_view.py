@@ -335,12 +335,13 @@ class MutualPrView(QWidget):
                   self.tr_("col_forecast_24h"), self.tr_("col_forecast_48h"),
                   self.tr_("col_forecast_72h"), self.tr_("col_forecast_week"),
                   self.tr_("col_forecast_month"), self.tr_("col_best_days"),
-                  self.tr_("col_repeated_after_month")]
+                  self.tr_("col_repeated_after_month"), self.tr_("folder_export_col_folder")]
         lines = ["| " + " | ".join(headers) + " |",
                  "| " + " | ".join(["---"] * len(headers)) + " |"]
         for entry in entries:
             days_label = " ".join(f"{_WD_EMOJI[d]}{self.tr_(_WD_KEYS[d])}({_fmt_rate_pct(r)})"
                                   for d, r in entry["best_days"])
+            folder = self.folder_store.get_folder(entry["folder_id"]) if entry["folder_id"] else None
             row = [
                 fmt_int(entry["followers"]), _channel_label(entry["channel"]),
                 fmt_int(round(entry["forecast"]["24h"])),
@@ -350,6 +351,7 @@ class MutualPrView(QWidget):
                 fmt_int(round(entry["forecast"]["month"])),
                 days_label,
                 fmt_int(round(entry["repeated"])),
+                folder["name"] if folder else self.tr_("folder_none"),
             ]
             lines.append("| " + " | ".join(c.replace("|", "\\|") for c in row) + " |")
         return "\n".join(lines) + "\n"
