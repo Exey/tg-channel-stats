@@ -553,9 +553,10 @@ MUTUAL_PR_FOLDER_NICHE = 0.30
 MUTUAL_PR_SIZE_MAX_RATIO = 100.0
 
 # The MPR Pairs table (UI card and Markdown export) lists every pair scoring
-# at or above this, best first — not a fixed top-N. MUTUAL_PR_MAX_PAIRS is
-# only a hard ceiling so a huge folder can't produce a runaway table.
-MUTUAL_PR_MIN_SCORE = 0.85
+# at or above this, best first, capped at MUTUAL_PR_MAX_PAIRS. The score
+# floor is intentionally low — the table is sorted best-first, so a weak
+# tail is just ignorable, and the cap is what actually bounds the size.
+MUTUAL_PR_MIN_SCORE = 0.51
 MUTUAL_PR_MAX_PAIRS = 500
 
 # How many "works well for both channels" weekdays mutual_best_days returns

@@ -300,8 +300,9 @@ sum in `[0, 1]`:
 | **`niche_affinity`** | 0.20 | `1.0` if the two channels carry the **same tag** (a real niche match), `0.30` (`MUTUAL_PR_FOLDER_NICHE`) if they only share a **folder**, else `0`. Tag-first on purpose: a folder is just sidebar organization, so a different-folder same-tag pair beats a same-folder unrelated-tag one. |
 
 The MPR Pairs table (UI card and Markdown export) lists **every pair scoring
-`MUTUAL_PR_MIN_SCORE` (0.85) or higher**, best first — not a fixed top-N
-(`MUTUAL_PR_MAX_PAIRS` is only a safety ceiling for a very large folder).
+`MUTUAL_PR_MIN_SCORE` (0.51) or higher, best first, capped at
+`MUTUAL_PR_MAX_PAIRS` (500)** — the low floor just keeps the ranked tail
+available; the cap is what bounds the table.
 Its **Best posting days** column shows each channel's own best days (`A: … ·
 B: …`) and prefixes `★` for the days that are a good ad slot in *both*
 channels at once — `mutual_best_days`, which takes any weekday above each
