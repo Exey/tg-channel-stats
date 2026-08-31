@@ -18,12 +18,14 @@ conversion rate) — see that module's docstring. mutual_pr_hint surfaces the
 same caveat in the UI itself, since this table is meant to inform deals with
 other people's channels, not just describe your own.
 
-Below the main table sit two more cards: the cross-channel **reposts** table
-(moved here from app.ui.folder_stat_view — who already reposts whom is
-exactly the pairs you don't need to broker a swap for), and **MPR Pairs** —
-the top channel pairs ranked by app.scoring_pr.rank_mutual_pr_pairs
-(size/engagement/timing/niche compatibility; the math lives there, not
-here). Both are scoped to whatever the folder filter is showing.
+Below the main table sit two more cards: **MPR Pairs** — the top channel
+pairs ranked by app.scoring_pr.rank_mutual_pr_pairs (size/engagement/timing/
+niche compatibility; the math lives there, not here), whose "best days"
+column shows each side's own best days plus a ★ for the days that suit both
+at once (mutual_best_days) — and, at the bottom, the cross-channel
+**reposts** table (moved here from app.ui.folder_stat_view — who already
+reposts whom is exactly the pairs you don't need to broker a swap for).
+Both are scoped to whatever the folder filter is showing.
 
 The Markdown export (_build_md) keeps the main forecast table byte-for-byte
 and *appends* just the MPR Pairs table ("## Пары ВП") — no reposts table,
@@ -119,6 +121,13 @@ _FORECAST_TABLE_COLS = (_COL_24H, 3, 4, 5, 6)
 # col index -> sortable (Best days isn't a single scalar).
 _SORTABLE_COLS = {0, 1, 2, 3, 4, 5, 6, 8}
 
+# MPR Pairs card column layout (index: №=0, Channel A=1, Channel B=2,
+# Rating=3, Best days=4, Forecast=5). Channel A/B stay Stretch — widening
+# the two fixed columns below is what shrinks them ~20%, on request.
+_PAIRS_RATING_COL_WIDTH = 62
+_PAIRS_DAYS_COL_WIDTH = 260   # +30%, and holds the new "★both · A · B" text
+_PAIRS_FORECAST_COL_WIDTH = 156  # +30% over the old ~120
+
 
 def _channel_label(ch: dict) -> str:
     username = ch.get("username") or ""
@@ -212,8 +221,8 @@ class MutualPrView(QWidget):
         page.addWidget(self.empty_lbl)
 
         page.addWidget(self._table_card(), 100)
-        page.addWidget(self._links_card())
         page.addWidget(self._pairs_card())
+        page.addWidget(self._links_card())
         page.addStretch(1)
 
         self.page_scroll.setWidget(page_holder)
@@ -301,6 +310,11 @@ class MutualPrView(QWidget):
         card = SectionCard(self.tr_("mutual_pr_partners_title"))
         self.pairs_card_ref = card
 
+        self.pairs_hint_lbl = QLabel(self.tr_("mutual_pr_partners_hint"))
+        self.pairs_hint_lbl.setObjectName("hint")
+        self.pairs_hint_lbl.setWordWrap(True)
+        card.body.addWidget(self.pairs_hint_lbl)
+
         self.pairs_empty_lbl = QLabel(self.tr_("mutual_pr_partners_empty"))
         self.pairs_empty_lbl.setObjectName("hint")
         card.body.addWidget(self.pairs_empty_lbl)
@@ -311,9 +325,12 @@ class MutualPrView(QWidget):
         self.pairs_table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
         self.pairs_table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
         pairs_header = self.pairs_table.horizontalHeader()
-        pairs_header.setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
-        pairs_header.setSectionResizeMode(2, QHeaderView.ResizeMode.Stretch)
+        pairs_header.setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)  # Channel A
+        pairs_header.setSectionResizeMode(2, QHeaderView.ResizeMode.Stretch)  # Channel B
         self.pairs_table.setColumnWidth(0, 40)
+        self.pairs_table.setColumnWidth(3, _PAIRS_RATING_COL_WIDTH)
+        self.pairs_table.setColumnWidth(4, _PAIRS_DAYS_COL_WIDTH)
+        self.pairs_table.setColumnWidth(5, _PAIRS_FORECAST_COL_WIDTH)
         self.pairs_table.cellDoubleClicked.connect(self._open_pair_channel)
         self.pairs_table.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         card.body.addWidget(self.pairs_table)
@@ -374,6 +391,10 @@ class MutualPrView(QWidget):
                 "forecast_range": ad_forecast_range(forecast),
                 "repeated": repeated_post_forecast(forecast["24h"], avg_posts_per_day),
                 "best_days": best_days(weekday_counts, interest),
+                # Full 7-day ranking — feeds mutual_best_days (the ★ days in
+                # the MPR Pairs "best days" column); the top-2 above still
+                # drives the day-overlap score component.
+                "best_days_full": best_days(weekday_counts, interest, top_n=7),
             })
         self._render_table()
 
@@ -398,6 +419,7 @@ class MutualPrView(QWidget):
                 "followers": e["followers"],
                 "forecast": e["forecast"],
                 "best_days": e["best_days"],
+                "best_days_full": e["best_days_full"],
                 "folder_id": e["folder_id"],
             })
         return out
@@ -498,8 +520,17 @@ class MutualPrView(QWidget):
     def _ranked_pairs(self) -> list[dict]:
         return rank_mutual_pr_pairs(self._pair_channels())
 
+    def _wd_list(self, days: list[int]) -> str:
+        return ", ".join(self.tr_(_WD_KEYS[d]) for d in days) or "—"
+
     def _pair_days_label(self, pair: dict) -> str:
-        return ", ".join(self.tr_(_WD_KEYS[d]) for d in pair["common_days"]) or "—"
+        """Both channels' best posting days, plus (prefixed with ★) the days
+        that work well for *both* at once — see
+        app.scoring_pr.mutual_best_days."""
+        text = f"A: {self._wd_list(pair['days_a'])} · B: {self._wd_list(pair['days_b'])}"
+        if pair.get("mutual_days"):
+            text = f"★ {self._wd_list(pair['mutual_days'])} · {text}"
+        return text
 
     @staticmethod
     def _pair_forecast_ab(pair: dict) -> str:
@@ -645,6 +676,7 @@ class MutualPrView(QWidget):
         self.links_empty_lbl.setText(self.tr_("mutual_pr_links_empty"))
         self._set_links_headers()
         self.pairs_card_ref.title_lbl.setText(self.tr_("mutual_pr_partners_title"))
+        self.pairs_hint_lbl.setText(self.tr_("mutual_pr_partners_hint"))
         self.pairs_empty_lbl.setText(self.tr_("mutual_pr_partners_empty"))
         self._set_pairs_headers()
         current_id = self.folder_combo.currentData()

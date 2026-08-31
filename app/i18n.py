@@ -165,10 +165,13 @@ EN = {
     "mutual_pr_links_empty": "No cross-channel reposts found.",
     # mutual pr — MPR Pairs (card + Markdown export)
     "mutual_pr_partners_title": "MPR Pairs",
+    "mutual_pr_partners_hint": "\"Best posting days\" shows each channel's own "
+                               "best days (A / B); ★ marks the days that are a "
+                               "good ad slot in both channels at once.",
     "mutual_pr_partners_empty": "No channel pairs to rank yet.",
     "mutual_pr_partners_col_a": "Channel A",
     "mutual_pr_partners_col_b": "Channel B",
-    "mutual_pr_partners_col_days": "Common best days",
+    "mutual_pr_partners_col_days": "Best posting days",
     "mutual_pr_partners_col_forecast": "24h forecast (A / B)",
     # high-quality posts view
     "nav_content_quality": "🎯 High-Quality Posts",
@@ -584,10 +587,13 @@ RU = {
     "mutual_pr_links_empty": "Репостов между каналами не найдено.",
     # mutual pr — «Пары ВП» (карточка + экспорт Markdown)
     "mutual_pr_partners_title": "Пары ВП",
+    "mutual_pr_partners_hint": "«Лучшие дни для поста» — свои лучшие дни "
+                               "каждого канала (A / B); ★ отмечает дни, "
+                               "удобные для рекламы сразу в обоих каналах.",
     "mutual_pr_partners_empty": "Пока нет пар каналов для оценки.",
     "mutual_pr_partners_col_a": "Канал A",
     "mutual_pr_partners_col_b": "Канал B",
-    "mutual_pr_partners_col_days": "Совпадение дней",
+    "mutual_pr_partners_col_days": "Лучшие дни для поста",
     "mutual_pr_partners_col_forecast": "Прогноз 24ч (A / B)",
     # high-quality posts view
     "nav_content_quality": "🎯 Лучшие посты",

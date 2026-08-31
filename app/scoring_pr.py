@@ -511,6 +511,10 @@ MUTUAL_PR_SIZE_MAX_RATIO = 100.0
 MUTUAL_PR_MIN_SCORE = 0.90
 MUTUAL_PR_MAX_PAIRS = 500
 
+# How many "works well for both channels" weekdays mutual_best_days returns
+# (the ★ days in the MPR Pairs "best days" column).
+MUTUAL_BEST_DAYS_TOP_N = 2
+
 
 def size_parity(followers_a: int, followers_b: int,
                 max_ratio: float = MUTUAL_PR_SIZE_MAX_RATIO) -> float:
@@ -547,6 +551,31 @@ def day_overlap(best_days_a, best_days_b) -> float:
     return len(days_a & days_b) / min(len(days_a), len(days_b))
 
 
+def mutual_best_days(ranked_a, ranked_b, top_n: int = MUTUAL_BEST_DAYS_TOP_N):
+    """Weekdays that are a good ad slot in *both* channels at once — for a
+    coordinated cross-promo where both sides post on the same day.
+
+    `ranked_a` / `ranked_b` are full best_days() outputs — every weekday
+    with its rate, i.e. `best_days(counts, interest, top_n=7)`. A day
+    qualifies only if it's at or above an average day (rate >= 1.0) for
+    *both* channels; qualifiers are ranked by the weaker of the two rates
+    (a day has to be solidly good on both sides, not great on one and
+    marginal on the other) and the best `top_n` come back as
+    `[(weekday_index, min_rate), …]`, best first. Empty when nothing clears
+    the bar on both sides.
+
+    Deliberately not a strict intersection of each channel's own top-2
+    best_days: that misses a day sitting at #3 for one channel but still
+    clearly above its average, which is exactly the kind of day a
+    coordinated post wants."""
+    rate_b = {int(d): r for d, r in ranked_b}
+    both = [(int(d), min(ra, rate_b.get(int(d), 0.0)))
+            for d, ra in ranked_a
+            if ra >= 1.0 and rate_b.get(int(d), 0.0) >= 1.0]
+    both.sort(key=lambda dr: dr[1], reverse=True)
+    return both[:top_n]
+
+
 def mutual_pr_pair_score(followers_a: int, followers_b: int,
                          forecast24_a: float, forecast24_b: float,
                          best_days_a, best_days_b,
@@ -574,14 +603,18 @@ def rank_mutual_pr_pairs(channels: list[dict],
     ceiling for a pathologically large folder, not a target count.
 
     Each `channels` item must carry: `followers` (int), `forecast` (the
-    ad_forecast dict, for its `"24h"` key), `best_days` (a best_days()
-    output), and `folder_id` (str or None). Anything else on the item
-    (label, link, …) is left untouched and comes back on the result's `a`
-    / `b`.
+    ad_forecast dict, for its `"24h"` key), `best_days` (a top-N best_days()
+    output — drives the day-overlap score component and each side's
+    headline days), `best_days_full` (a best_days(..., top_n=7) output —
+    drives `mutual_days`; falls back to `best_days` if absent), and
+    `folder_id` (str or None). Anything else on the item (label, link, …)
+    is left untouched and comes back on the result's `a` / `b`.
 
     Each result item: `{"a", "b", "score", "size_parity", "quality_parity",
-    "day_overlap", "same_folder", "common_days"}` where `common_days` is
-    the sorted list of weekday indices both channels have as a best day."""
+    "day_overlap", "same_folder", "days_a", "days_b", "mutual_days"}` —
+    `days_a` / `days_b` are each channel's own best weekday indices, and
+    `mutual_days` are the weekday indices that work well for *both* (see
+    mutual_best_days)."""
     ranked: list[dict] = []
     for i in range(len(channels)):
         for j in range(i + 1, len(channels)):
@@ -594,9 +627,14 @@ def rank_mutual_pr_pairs(channels: list[dict],
                 a.get("best_days") or [], b.get("best_days") or [],
                 bool(fid_a) and fid_a == fid_b,
             )
-            common = sorted({int(d) for d, _ in (a.get("best_days") or [])}
-                            & {int(d) for d, _ in (b.get("best_days") or [])})
-            if comp["score"] >= min_score:
-                ranked.append({"a": a, "b": b, "common_days": common, **comp})
+            if comp["score"] < min_score:
+                continue
+            days_a = [int(d) for d, _ in (a.get("best_days") or [])]
+            days_b = [int(d) for d, _ in (b.get("best_days") or [])]
+            mutual = [d for d, _ in mutual_best_days(
+                a.get("best_days_full") or a.get("best_days") or [],
+                b.get("best_days_full") or b.get("best_days") or [])]
+            ranked.append({"a": a, "b": b, "days_a": days_a, "days_b": days_b,
+                           "mutual_days": mutual, **comp})
     ranked.sort(key=lambda p: p["score"], reverse=True)
     return ranked[:max_pairs]

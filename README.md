@@ -118,12 +118,14 @@ posts with. All figures beyond Followers are heuristic estimates — see
 [scoring_pr.py](#mutual-pr-ad-swap-forecast) — and the view
 says so in the UI.
 
-Below the table sit two more cards: the **cross-channel reposts** table (who
-already reposts whom — moved here from Folder Stats) and **MPR Pairs** — the
-top channel pairs ranked for an ad swap by size / engagement / timing /
-niche compatibility (see [scoring_pr.py](#mutual-pr-partner-matching)). The
-**Markdown export** keeps the main forecast table intact and appends just
-the MPR Pairs table (`## Пары ВП`).
+Below the table sit two more cards: **MPR Pairs** — channel pairs ranked for
+an ad swap by size / engagement / timing / niche compatibility, with a
+**Best posting days** column showing each side's best days plus `★` for the
+days that suit both at once (see
+[scoring_pr.py](#mutual-pr-partner-matching)) — and, at the bottom, the
+**cross-channel reposts** table (who already reposts whom — moved here from
+Folder Stats). The **Markdown export** keeps the main forecast table intact
+and appends just the MPR Pairs table (`## Пары ВП`).
 
 ### Login, profiles, connection settings
 
@@ -288,14 +290,19 @@ sum in `[0, 1]`:
 | --- | --- | --- |
 | **`size_parity`** | 0.30 | `1 − abs(log10 subs_A − log10 subs_B) / log10(100)`, clamped to `[0, 1]` — 1.0 for equal size, 0 once one channel is 100× the other. Log-scaled, so a 2× gap scores the same at any absolute size. |
 | **`quality_parity`** | 0.30 | `1 − abs(f24_A − f24_B) / (f24_A + f24_B)` — how close the two 24h ad-post forecasts are (a proxy for "both convert ad views similarly"). |
-| **`day_overlap`** | 0.20 | common best-posting weekdays over `min(len_A, len_B)` — 1.0 when they share all their `best_days`. |
+| **`day_overlap`** | 0.20 | shared entries in the two channels' top-2 `best_days` over `min(len_A, len_B)` — 1.0 when both top-2 sets match. |
 | **same folder** | 0.20 | `1` if both channels are in the same folder (same niche → more relevant audience), else `0`. |
 
 The MPR Pairs table (UI card and Markdown export) lists **every pair scoring
 `MUTUAL_PR_MIN_SCORE` (0.90) or higher**, best first — not a fixed top-N
 (`MUTUAL_PR_MAX_PAIRS` is only a safety ceiling for a very large folder).
-All weights and constants are ordinary module-level values, meant to be
-retuned.
+Its **Best posting days** column shows each channel's own best days (`A: … ·
+B: …`) and prefixes `★` for the days that are a good ad slot in *both*
+channels at once — `mutual_best_days`, which takes any weekday above each
+channel's own average (not just a strict overlap of their top-2, which
+would miss a day ranked #3 for one side but still clearly above its
+average). All weights and constants are ordinary module-level values, meant
+to be retuned.
 
 ## Requirements
 
