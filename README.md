@@ -3,8 +3,10 @@
 A cross-platform desktop app for analyzing Telegram channels. Point it at any
 public channel (or a private one you're a member of), pick a period, and it
 scans every post to rank the top performers **and** compute activity
-analytics — then presents both on a dashboard you can re-open, re-fetch, and
-export.
+analytics. Track many channels side by side, organize them into folders and
+tags, and use the folder-level views to study cross-promotion, content
+quality, and ad-swap ("mutual PR") potential across a whole group of
+channels — all on dashboards you can re-open, re-fetch, and export.
 
 Built with [PySide6](https://doc.qt.io/qtforpython/) (Qt for Python) and
 [Telethon](https://docs.telethon.dev/). English and Russian UI.
@@ -28,16 +30,23 @@ equivalent.
 ## What it does
 
 For a chosen channel and time window, a single pass over the channel's history
-produces:
+produces one JSON checkpoint holding:
 
-- **Engagement ranking** — per-post views, reactions and forwards ("private
-  reposts"), with albums merged into one row. It keeps the union of the top-N
-  by each metric, so the on-screen table can re-sort by any column and still
-  show the true leaders. Optionally fetches **public reposts** for that pool
-  (which channels re-shared each post), where stats access allows.
+- **Engagement ranking** — per-post views, reactions, forwards ("private
+  reposts"), comments, and media type, with albums merged into one row. It
+  keeps the union of the top-N by each metric *plus* the most recent top-N
+  *plus* the best post of every calendar month, so the on-screen table can
+  re-sort by any column and still show the true leaders, and the
+  quality/recent views never silently drop a month. Optionally fetches
+  **public reposts** for that pool (which channels re-shared each post),
+  where stats access allows.
 - **Activity analytics** — member count, creation date, posts/day,
-  average/max views, average reactions, share of posts with media, and
-  distributions by **hour of day**, **day of week**, and **month**.
+  average/max views, average/max reposts, average reactions, share of posts
+  with media, "settled" average views (posts older than 14 days, whose view
+  count has stopped climbing), a trimmed repost average, viral-post share,
+  and distributions by **hour of day**, **day of week**, and **month** (with
+  per-month view/share/reaction totals over *every* scanned post, not just
+  the top-N sample).
 
 Each analyzed channel is saved as its own JSON checkpoint and listed in the
 sidebar, so closing the app (or a crash mid-scan) never loses a fetch and you
@@ -45,21 +54,220 @@ can re-open any channel instantly without re-scanning Telegram.
 
 ## Features
 
-- **Dashboard** with stat cards, activity charts (monthly / hourly / weekday),
-  and a sortable table of top posts. Click a post to open it in Telegram;
-  click a reposts cell to see who re-shared it.
+### Per-channel dashboard
+
+Stat cards (members, posts, posts/day, avg views, **ERR%**, **ERV%**,
+**Virality index**, avg reposts/reactions — see
+[Stats & scoring algorithms](#stats--scoring-algorithms)), a wide activity
+trend chart with toggleable Views / Reactions / Shares / Posts / **Quality**
+lines (month or season buckets), by-hour and by-weekday bar charts, a "Last
+50 Posts" card row with per-post content-quality gauges, and a sortable
+top-posts table. Click a post to open it in Telegram; click a reposts cell
+to see who re-shared it. Export the report as Markdown or copy a plain-text
+link list.
+
+### Multi-channel comparison
+
+- **Metrics** (`⚖️⭐️`) — pick 2–8 channels from the sidebar and see their
+  stat cards laid out one column per channel for an easy diff, exportable as
+  a Markdown table.
+- **Charts** (`⚖️📈`) — pick up to 8 channels and overlay them on five
+  stacked trend charts (Quality, Views, Shares, Reactions, Posts), sharing
+  one month/season toggle.
+
+### Folders & tags
+
+- **Folders** — user-defined groups with a color, managed in-app. Assign
+  channels from the sidebar's right-click menu, the dashboard's folder
+  button, or Config's "assign every channel to a folder" bulk action. The
+  sidebar can group and sort by folder.
+- **Tags** — a lightweight one-tag-per-channel taxonomy loaded from a
+  Markdown table (`| tag | long tag | description |`); edit the source `.md`
+  and reload to change the tag set. Only the per-channel assignment is
+  app-owned.
+
+### Folder Stats view (`📁`)
+
+For one folder and one period (monthly / seasonal / rolling-year window):
+
+- **Reposts between the folder's channels** — a table of who reposted whom,
+  built from the stored top-N sample.
+- **Periodic stats** — per-channel views / shares / reactions / viral-share,
+  the period's most-viewed post, **Post Quality**, and a composite
+  **Rating** (see [rating.py](#composite-channel-rating)),
+  exportable as Markdown.
+
+### High-Quality Posts view (`🎯`)
+
+For one folder and period, a grid of individual **posts** (not channels)
+ranked by content quality — proportional engagement relative to that post's
+own reach, not raw view count (see
+[scoring.py](#per-post-content-quality)). Filters for minimum
+followers, hiding text-only posts, and per-channel caps. Optional on-demand
+**thumbnail fetch** (downloads only the smallest preview image for the posts
+on screen into a local cache — nothing else in the app downloads media).
+Export as a Markdown table or a copyable Tg-links list with a "top authors"
+summary.
+
+### Mutual PR (ad-swap) view (`🤝`)
+
+Every tracked channel in one sortable table: followers, an estimated
+**ad-post follower-gain forecast** at five horizons (24h / 48h / 72h / week /
+month), a "repeated after a month" estimate for a reminder post, and the
+least-crowded weekdays to slot an ad in (each with a "how much better than an
+average day" rate). Meant to help decide which channels are worth trading ad
+posts with. All figures beyond Followers are heuristic estimates — see
+[scoring_pr.py](#mutual-pr-ad-swap-forecast) — and the view
+says so in the UI. Exportable as Markdown.
+
+### Login, profiles, connection settings
+
 - **Two login flows** — QR code (scan from Telegram → Settings → Devices) or
   the classic phone number + SMS code, with 2FA-password support. The session
   is saved, so later fetches need no re-login.
 - **Named profiles** — keep several accounts/API keys side by side.
 - **`.env` import/export** of connection settings (also understands
   `TG_API_ID` / `TG_API_HASH` / `TG_PHONE` naming).
-- **Markdown export** of a channel report (stats + top-posts table).
-- **Bilingual UI** — English and Russian, switchable at runtime.
+- **Refresh comments** — a folder-wide action that re-reads just the comment
+  count for stored posts (added after some checkpoints were fetched) without
+  a full re-scan.
+
+### UI
+
+- **Bilingual** — English and Russian, switchable at runtime with no widget
+  rebuild (a running fetch and unsaved fields survive the switch).
 - **Light / Dark theme** — follows the OS appearance by default (and updates
-  live if you flip it), or pin Light/Dark explicitly from the **Theme** menu.
-- Runs Telegram work on a background thread, so the GUI never freezes; scans
-  are cancellable.
+  live if you flip it), or pin Light/Dark from the **Theme** menu.
+- Telegram work runs on a background thread, so the GUI never freezes; scans
+  are cancellable. Rate limits (FloodWait) and transient network errors are
+  retried automatically with backoff.
+- Charts are drawn natively with QPainter — no matplotlib or QtCharts.
+
+## Stats & scoring algorithms
+
+Three modules hold the formulas, kept separate from the views so multiple
+views can share one implementation. Each module's own docstring carries the
+full rationale and the tuning history; this is the summary.
+
+### Channel-level metrics
+
+Computed once per fetch by `app/tools/channel_stat.py` and stored in the
+checkpoint's `stats`:
+
+| Metric | Formula | Notes |
+| --- | --- | --- |
+| **ERR%** (engagement rate by reach) | `avg_views_settled / members × 100` | `avg_views_settled` averages only posts older than 14 days, whose view count has settled. |
+| **ERV%** (engagement rate by views) | `(avg_reactions + avg_reposts) / avg_views × 100` | Shown on the dashboard and Compare views. |
+| **Virality index** | `max_views / avg_views` | Spread between the best post and the average — how often the channel lands an outlier hit. |
+| **Viral post share** | `% of posts with views > 2 × avg_views` | Feeds the Rating and Mutual PR math. |
+| **Avg reposts (trimmed)** | mean after dropping the top 10% of posts by repost count | Reposts are far more top-heavy than views/reactions, so the plain average swings on one-off spikes. |
+
+### Per-post content quality
+
+`app/scoring.py` ranks individual posts by *proportional* engagement — how much a post
+punched above its own reach — not by raw views. Shared by the High-Quality
+Posts grid, the dashboard's Quality trend line and post cards, and the
+Folder Stats "Post Quality" column; it also feeds the Rating's quality term
+and Mutual PR's "Interest".
+
+Per post, given the post's `views`, `reactions`, `forwards`, `comments`, and
+its channel's `avg_views`:
+
+1. A post with an **inline keyboard** (`has_buttons`) scores **0** outright —
+   an ad/CTA button is what's driving its engagement, not the content.
+2. `comments` are capped at 100 (past that a post clearly has real
+   discussion either way).
+3. `reaction_wt` is tapered in two brackets: the first 1 000 reactions count
+   at 0.045 each, 1 000–10 000 at only 0.005 each, beyond 10 000 nothing more
+   is added (reaction counts can run anomalously high relative to a post's
+   own views).
+4. `viral_excess = max(0, views − avg_views)` — a bonus for beating the
+   channel's *own* usual reach, weighted 0.2.
+5. `ERV% = (forwards×1.0 + comments×0.25 + reaction_wt + viral_excess×0.2) / views × 100`
+6. `raw = ERV% × 100`
+7. `gauge = 1000 × raw / (raw + 580)` — a saturating curve onto the 0–1000
+   gauge (K = 580 ≈ this app's real per-post median raw score, so a typical
+   post lands mid-gauge; a hard clamp would flatten most real posts at the
+   ceiling).
+
+Numerator terms are ordered by how much each really signals quality:
+forwards (a deliberate, costly share) first, then comments, then reactions
+(cheapest, easiest to pump).
+
+### Composite channel Rating
+
+`app/rating.py` produces a per-channel-per-period score in `[0, 1]`, shown in the Folder Stats
+"Rating" column and reused verbatim by Config's Folders MD export. Channels
+are grouped by folder and each channel is normalized against **only its own
+folder's peers** for the same period.
+
+For each channel entry in a period bucket (`views`, `shares`, `reactions`,
+`quality`, `viral_share`):
+
+- **views** — min-max normalized within the bucket, weight `0.70` (the
+  single biggest weight).
+- **engagement** — `shares + 0.05 × reactions`, min-max normalized, weight
+  `0.65`. Reactions count for only 5% of raw value because reaction counts
+  are the easier of the two to artificially pump; a repost is a costlier,
+  harder-to-fake action.
+- **quality** — the per-post gauge above, averaged per channel per period,
+  min-max normalized, weight `0.45`.
+- **virality** — an *absolute* (not normalized) curve over `viral_share`:
+  0% → 0, 1% → 0.05, ramping to 1.0 at 15%+. Its weight itself ramps from
+  `0.10` to `0.51` as `viral_share` climbs to 15%, so virality matters more
+  to a channel that actually is viral.
+
+`score = (weighted sum of the four terms) / (sum of the four actual
+weights)` — that division is the one and only normalization step.
+
+**Zero-reposts red flag:** a channel with ~0 reposts in the period has its
+`viral_share` cut by 40% *before* the virality curve, and the whole
+composite score cut by another 40% flat — apparent virality nobody actually
+shared is a warning sign the other metrics don't catch.
+
+### Mutual PR ad-swap forecast
+
+Unlike `app/scoring.py` (tuned against this app's own real median),
+`app/scoring_pr.py` is built on **documented heuristics, not measurements** — there is no real
+ad-campaign outcome data anywhere in the app. The constants exist so a
+forecast can be produced at all, and are ordinary module constants
+specifically so they can be retuned once real ad-swap outcomes are logged.
+
+- **`AD_VIEW_CURVE`** — assumed fraction of a post's eventual reach landed by
+  each horizon: 24h `0.49`, 48h `0.75`, 72h `0.78`, week `0.80`, month
+  `1.00`.
+- **Reach basis** — `avg_views_settled`, capped at `followers × 1.0`. Views
+  beyond a channel's own subscriber base reflect viral/external discovery a
+  freshly-placed ad post wouldn't inherit.
+- **Follow-conversion rate** —
+  `0.036 × (0.5 + weight × interest_gauge/1000)`, where `weight = 0.3 ×
+  size_band_factor(followers)`. Content quality ("Interest", the average
+  post-quality gauge over the last ~90 days) swings the rate only ~0.5–0.8×;
+  that swing is tripled for channels in the 5 000–30 000 follower band,
+  where quality reads as a more reliable predictor.
+- **Viral boost** — a ≥1 multiplier from `viral_post_share`, applied only
+  within the 5K–30K band and only when the reach cap above didn't already
+  fire (so virality isn't credited twice).
+- **`total = reach × rate × boost`**, then **redistributed** across the
+  horizon fractions by posting rarity: a channel posting below the app's
+  median (~0.525 posts/day) has its post linger un-buried, so its reach
+  arrives more gradually — early-horizon fractions shrink toward later ones
+  (month's fraction is always exactly 1.0, so no horizon can ever exceed the
+  total). The rarity effect is squared to separate moderate from extreme
+  rare-posters and scaled down for channels with fewer than 20 stored posts.
+- **`link_behavior_factor`** — ×(up to 1.05) for a channel that consistently
+  single-mentions other channels (genuine cross-promotion), ×(down to 0.95)
+  for one that consistently posts external-link spam.
+- **`ad_forecast_range`** — a crude ±band (low `×0.40`, high `×1.80`)
+  combining the two dominant unverified constants; honestly labeled, not a
+  fitted interval.
+- **`repeated_post_forecast`** — a reminder post a month later, decayed by
+  how many of the channel's own posts ran in between:
+  `retention = 1 / (1 + posts_between / 16)`.
+- **`best_days`** — least-crowded weekdays scored
+  `(1 − normalized post rate) × interest_gauge`; the displayed "better than
+  an average day" rate is damped to 25% of its raw deviation (the ranking
+  still uses the undamped score).
 
 ## Requirements
 
@@ -96,20 +304,6 @@ install required to run it) via [PyInstaller](https://pyinstaller.org/):
 build.bat           # Windows
 ```
 
-PyInstaller doesn't cross-compile, so build on each OS you want a binary
-for. Output goes to `dist/` as `tg-channel-stats_<version>` (dots as
-underscores, e.g. `tg-channel-stats_26_7_30`):
-
-- **macOS** — `tg-channel-stats_26_7_30.app`
-- **Windows** — `tg-channel-stats_26_7_30.exe`
-- **Linux** — `tg-channel-stats_26_7_30`
-
-The version string comes from `app/version.py`. Windows and Linux binaries
-also build automatically in CI on every push to `main`
-(`.github/workflows/build.yml`) — download them from the workflow run's
-Artifacts; macOS is left out of CI (10x the Actions minutes of Linux) and
-built locally instead.
-
 ## Getting API credentials
 
 1. Open [my.telegram.org](https://my.telegram.org) and log in with your phone
@@ -134,26 +328,34 @@ main.py` in an activated venv), then:
 3. Click **Fetch & analyze**. The channel appears in the sidebar with its
    dashboard; **Re-fetch** to refresh it, **Export** to save a Markdown
    report, **Remove** to drop it.
+4. Group channels into folders/tags, then open the **Folder Stats**,
+   **High-Quality Posts** or **Mutual PR** views from the sidebar for
+   folder-wide analysis.
 
 **Which channels can I analyze?** Any public channel by `@username`, or a
 private one you're a member of by its `-100…` ID or `t.me` link.
 
 ## Where data is stored
 
-Config, sessions, checkpoints and logs live in the OS-standard per-user
-locations under an app folder (`TgChannelStat`). Open **File → Open config
-folder** to jump straight there.
+Config, sessions, checkpoints, caches and logs live in the OS-standard
+per-user locations under an app folder (`TgChannelStat`). Open **File → Open
+config folder** to jump straight there.
 
 | Data | macOS | Windows | Linux |
 | --- | --- | --- | --- |
-| Config, sessions, checkpoints | `~/Library/Application Support/TgChannelStat` | `%APPDATA%\TgChannelStat` | `$XDG_CONFIG_HOME` or `~/.config/TgChannelStat` |
+| Config, sessions, checkpoints, folders, tags, media cache | `~/Library/Application Support/TgChannelStat` | `%APPDATA%\TgChannelStat` | `$XDG_CONFIG_HOME` or `~/.config/TgChannelStat` |
 | Logs | `~/Library/Logs/TgChannelStat` | `%LOCALAPPDATA%\TgChannelStat\logs` | `$XDG_STATE_HOME` or `~/.local/state/tgchannelstat` |
 
-- **Config** (`config.json`) holds language, profiles, and connection fields.
-- **Sessions** are Telethon session files (one per profile) — your login.
-- **Checkpoints** (`checkpoints/<channel>.json`) are the per-channel fetch
-  results shown in the sidebar. `@Name`, `Name`, and the `-100…` ID all map to
-  the same checkpoint.
+- **`config.json`** — language, theme, profiles, and connection fields.
+- **Sessions** (`sessions/`) — Telethon session files (one per profile).
+- **Checkpoints** (`checkpoints/<channel>.json`) — the per-channel fetch
+  results shown in the sidebar. `@Name`, `Name`, and the `-100…` ID all map
+  to the same checkpoint.
+- **`folders.json`** — folder definitions and channel→folder assignments.
+- **`tags.json`** — the loaded tag list, its source `.md` path, and
+  channel→tag assignments.
+- **`media/`** — cached post thumbnails downloaded on demand by the
+  High-Quality Posts / dashboard "Fetch media" button.
 - **Logs** rotate at ~2 MB, keeping 5 backups.
 
 ## Project layout
@@ -169,32 +371,59 @@ app/
 ├── version.py              # app version string (CalVer: YY.M.D)
 ├── config.py               # JSON config: profiles + .env import/export
 ├── store.py                # per-channel JSON checkpoint store
+├── folders.py              # folder definitions + channel assignments
+├── tags.py                 # tag taxonomy loaded from a Markdown table
+├── periods.py              # month/season/rolling-year period-key helpers
+├── media_cache.py          # on-disk thumbnail cache paths
+├── scoring.py              # per-post content-quality formula (shared)
+├── rating.py               # composite per-channel-per-period Rating (shared)
+├── scoring_pr.py           # Mutual PR ad-swap forecast heuristics
 ├── worker.py               # QThread workers: login flows + tool runs
 ├── i18n.py                 # English / Russian strings
+├── text_utils.py           # small string helpers
+├── errors.py               # friendly OS-error messages
 ├── tools/
 │   ├── channel_stat.py     # the scan: engagement ranking + activity stats
+│   ├── comments_refresh.py # re-read just the comment count for stored posts
+│   ├── media_fetch.py      # on-demand post-thumbnail download
 │   └── common.py           # entity resolution, FloodWait retries
 └── ui/
-    ├── main_window.py      # sidebar + stacked Config / Dashboard views
-    ├── config_view.py      # credentials, profiles, login, fetch form
-    ├── dashboard_view.py   # stat cards, charts, top-posts table, export
-    ├── side_panel.py       # Config + fetched-channels list
-    ├── charts.py           # activity chart widgets
-    ├── qr_login_dialog.py  # QR-code login dialog
-    ├── widgets.py          # shared widgets
-    └── theme.py            # QSS stylesheet
+    ├── main_window.py         # sidebar + stacked content views
+    ├── config_view.py         # credentials, profiles, login, fetch form, folder MD export
+    ├── dashboard_view.py      # stat cards, charts, post cards, top-posts table, export
+    ├── compare_view.py        # side-by-side stat cards for 2-8 channels
+    ├── compare_charts_view.py  # overlaid trend charts for up to 8 channels
+    ├── folder_stat_view.py    # cross-channel reposts + periodic stats + Rating
+    ├── content_quality_view.py # High-Quality Posts grid
+    ├── mutual_pr_view.py      # ad-swap follower-gain forecast table
+    ├── folder_dialog.py       # folder manager dialog
+    ├── side_panel.py          # Config + fetched-channels list, compare modes
+    ├── charts.py              # native QPainter chart widgets
+    ├── qr_login_dialog.py     # QR-code login dialog
+    ├── widgets.py             # shared card widgets (StatCard, PostCard, gauges…)
+    └── theme.py               # QSS stylesheet + palette
 assets/svgs/                # UI icons
 ```
 
 ## Notes & limitations
 
+- **Folder-level views read stored checkpoints, not fresh Telegram data.**
+  Per-period view/share/reaction totals come from every scanned post and are
+  accurate; the reposts-between-channels table and per-post quality rely on
+  the stored top-N sample, so they're only as complete as the top-N and
+  "include public reposts" choices made when each channel was fetched.
+- **New per-post fields** (`comments`, `media_type`, `has_buttons`) are only
+  present on checkpoints fetched after they were added — older checkpoints
+  show 0 comments, a text-only placeholder icon, and no ad-button exclusion
+  until refetched (or, for comments, until "Refresh comments" is run).
+- **Mutual PR forecasts are heuristics, not measurements** — see
+  [scoring_pr.py](#mutual-pr-ad-swap-forecast). Treat the
+  numbers as rough order-of-magnitude guidance.
 - **Private channels typed as bare numeric IDs**: Telethon can only resolve a
   peer it has an `access_hash` for. If a `-100…` ID isn't found, the app falls
   back to scanning your dialogs — so being a member of the channel is what
   makes it resolvable.
 - **Public reposts** require a channel you have statistics access to; where
   unavailable, that column is simply left blank.
-- Rate limits (FloodWait) and transient network errors are retried
-  automatically with backoff.
 - This tool only reads data your own account can already see; it does nothing
   a normal Telegram client couldn't.
