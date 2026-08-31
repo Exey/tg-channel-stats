@@ -255,7 +255,12 @@ specifically so they can be retuned once real ad-swap outcomes are logged.
 - **Viral boost** — a ≥1 multiplier from `viral_post_share`, applied only
   within the 5K–30K band and only when the reach cap above didn't already
   fire (so virality isn't credited twice).
-- **`total = reach × rate × boost`**, then **redistributed** across the
+- **`size_forecast_multiplier`** — a deliberate flat scale-up on top of the
+  calibrated base: **×3.0 for channels up to ~6 000 followers, ×1.5 for
+  larger** (linear between 6 000 and 7 000), since smaller channels convert
+  a borrowed audience into followers far better.
+- **`total = reach × rate × boost × size_forecast_multiplier`**, then
+  **redistributed** across the
   horizon fractions by posting rarity: a channel posting below the app's
   median (~0.525 posts/day) has its post linger un-buried, so its reach
   arrives more gradually — early-horizon fractions shrink toward later ones
@@ -294,7 +299,7 @@ sum in `[0, 1]`:
 | **same folder** | 0.20 | `1` if both channels are in the same folder (same niche → more relevant audience), else `0`. |
 
 The MPR Pairs table (UI card and Markdown export) lists **every pair scoring
-`MUTUAL_PR_MIN_SCORE` (0.90) or higher**, best first — not a fixed top-N
+`MUTUAL_PR_MIN_SCORE` (0.85) or higher**, best first — not a fixed top-N
 (`MUTUAL_PR_MAX_PAIRS` is only a safety ceiling for a very large folder).
 Its **Best posting days** column shows each channel's own best days (`A: … ·
 B: …`) and prefixes `★` for the days that are a good ad slot in *both*

@@ -46,6 +46,12 @@ what an actual ad-swap post does (follower count before, then at 24h/48h/
 week/month) is the real fix, not anything below; there's currently no
 pipeline for that, so everything here stays a heuristic in the meantime.
 
+On top of the calibrated base, ad_forecast applies size_forecast_multiplier
+— a deliberate flat scale-up (×3 for channels up to ~6k followers, ×1.5 for
+larger, see the FORECAST_SMALL_/FORECAST_LARGE_ constants) reflecting that
+smaller channels convert borrowed audience far better. This intentionally
+departs from the two-channel calibration above; retune it there.
+
 Reach (avg_views_settled) is used directly and unmodified as the forecast's
 total-reach basis — not blended or capped against a shorter, noisier recent
 window. An earlier version tried grounding the "month" figure in a 30-60-
@@ -228,6 +234,21 @@ DATA_QUALITY_MIN_POSTS = 20
 FORECAST_LOW_MULT = 0.5 * 0.8
 FORECAST_HIGH_MULT = 1.5 * 1.2
 
+# Flat scale-up of the whole forecast by channel size, applied on top of
+# everything else in ad_forecast. Smaller channels convert borrowed
+# audience into followers at a much higher rate than big ones — an ad post
+# in a niche 3k-follower channel reaches people for whom it's a genuine
+# discovery, while the same post in a 100k channel mostly reaches people
+# who already know it exists. ×FORECAST_SMALL_MULT at/below
+# FORECAST_SMALL_MAX followers, ×FORECAST_LARGE_MULT at/above
+# FORECAST_LARGE_MIN, linear between (a soft landing, not a cliff at 6k).
+# This is a deliberate override on top of the calibrated base above —
+# retune freely.
+FORECAST_SMALL_MAX = 6_000
+FORECAST_LARGE_MIN = 7_000
+FORECAST_SMALL_MULT = 3.0
+FORECAST_LARGE_MULT = 1.5
+
 # A post name-dropping 1-MENTION_LINK_MAX_COUNT other channels (a t.me/ or
 # @mention link) reads as genuine single-mention cross-promotion — the
 # behavior this whole view exists to find — and earns up to
@@ -390,6 +411,19 @@ def link_behavior_factor(rows: list[dict]) -> float:
     return max(0.0, 1 + bonus - penalty)
 
 
+def size_forecast_multiplier(followers: int) -> float:
+    """Flat forecast scale-up by channel size — see the FORECAST_SMALL_/
+    FORECAST_LARGE_ constants. FORECAST_SMALL_MULT at/below
+    FORECAST_SMALL_MAX followers, FORECAST_LARGE_MULT at/above
+    FORECAST_LARGE_MIN, linearly interpolated in between."""
+    if followers <= FORECAST_SMALL_MAX:
+        return FORECAST_SMALL_MULT
+    if followers >= FORECAST_LARGE_MIN:
+        return FORECAST_LARGE_MULT
+    t = (followers - FORECAST_SMALL_MAX) / (FORECAST_LARGE_MIN - FORECAST_SMALL_MAX)
+    return FORECAST_SMALL_MULT + t * (FORECAST_LARGE_MULT - FORECAST_SMALL_MULT)
+
+
 def ad_forecast(avg_views_settled: float, interest_gauge: float,
                 avg_posts_per_day: float, total_posts: int = 0,
                 followers: int = 0, viral_post_share: float = 0.0,
@@ -397,7 +431,8 @@ def ad_forecast(avg_views_settled: float, interest_gauge: float,
     """Estimated *new followers* gained by each horizon after an ad post.
 
     One fixed total — reach_basis(avg_views_settled, followers) ×
-    follow_conversion_rate(..., followers) × viral_boost(...) — is
+    follow_conversion_rate(..., followers) × viral_boost(...) ×
+    size_forecast_multiplier(followers) — is
     multiplied out across `_rarity_curve`'s per-horizon fractions.
     Posting-rarity reshapes *when* that fixed total arrives (see
     _rarity_curve and the module docstring on why this is a
@@ -410,7 +445,7 @@ def ad_forecast(avg_views_settled: float, interest_gauge: float,
     reach, was_capped = reach_basis(avg_views_settled, followers)
     rate = follow_conversion_rate(interest_gauge, followers)
     boost = viral_boost(viral_post_share, followers, was_capped)
-    total = reach * rate * boost
+    total = reach * rate * boost * size_forecast_multiplier(followers)
     curve = _rarity_curve(avg_posts_per_day, total_posts)
     forecast = {horizon: total * fraction for horizon, fraction in curve.items()}
     if rows is not None:
@@ -508,7 +543,7 @@ MUTUAL_PR_SIZE_MAX_RATIO = 100.0
 # The MPR Pairs table (UI card and Markdown export) lists every pair scoring
 # at or above this, best first — not a fixed top-N. MUTUAL_PR_MAX_PAIRS is
 # only a hard ceiling so a huge folder can't produce a runaway table.
-MUTUAL_PR_MIN_SCORE = 0.90
+MUTUAL_PR_MIN_SCORE = 0.85
 MUTUAL_PR_MAX_PAIRS = 500
 
 # How many "works well for both channels" weekdays mutual_best_days returns
