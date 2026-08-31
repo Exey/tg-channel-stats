@@ -88,14 +88,12 @@ link list.
 
 ### Folder Stats view (`📁`)
 
-For one folder and one period (monthly / seasonal / rolling-year window):
-
-- **Reposts between the folder's channels** — a table of who reposted whom,
-  built from the stored top-N sample.
-- **Periodic stats** — per-channel views / shares / reactions / viral-share,
-  the period's most-viewed post, **Post Quality**, and a composite
-  **Rating** (see [rating.py](#composite-channel-rating)),
-  exportable as Markdown.
+For one folder and one period (monthly / seasonal / half-year / rolling-year
+window): **periodic stats** — per-channel views / shares / reactions /
+viral-share, the period's most-viewed post, **Post Quality**, and a
+composite **Rating** (see [rating.py](#composite-channel-rating)),
+exportable as Markdown. (The cross-channel reposts table that used to live
+here now sits at the bottom of the Mutual PR view.)
 
 ### High-Quality Posts view (`🎯`)
 
@@ -118,7 +116,14 @@ least-crowded weekdays to slot an ad in (each with a "how much better than an
 average day" rate). Meant to help decide which channels are worth trading ad
 posts with. All figures beyond Followers are heuristic estimates — see
 [scoring_pr.py](#mutual-pr-ad-swap-forecast) — and the view
-says so in the UI. Exportable as Markdown.
+says so in the UI.
+
+Below the table sit two more cards: the **cross-channel reposts** table (who
+already reposts whom — moved here from Folder Stats) and **MPR Pairs** — the
+top channel pairs ranked for an ad swap by size / engagement / timing /
+niche compatibility (see [scoring_pr.py](#mutual-pr-partner-matching)). The
+**Markdown export** keeps the main forecast table intact and appends just
+the MPR Pairs table (`## Пары ВП`).
 
 ### Login, profiles, connection settings
 
@@ -268,6 +273,29 @@ specifically so they can be retuned once real ad-swap outcomes are logged.
   `(1 − normalized post rate) × interest_gauge`; the displayed "better than
   an average day" rate is damped to 25% of its raw deviation (the ranking
   still uses the undamped score).
+
+### Mutual PR partner matching
+
+`rank_mutual_pr_pairs` (bottom of `app/scoring_pr.py`) scores every *pair*
+of channels for how good an ad swap between them would be — the basis for
+the **MPR Pairs** card and the `## Пары ВП` section appended to the Mutual
+PR Markdown export. It uses only metrics the app already has (no mention
+graph, so it can't tell whether two channels have already promoted each
+other — filter those out upstream). The four components are a plain weighted
+sum in `[0, 1]`:
+
+| Component | Weight | Formula |
+| --- | --- | --- |
+| **`size_parity`** | 0.30 | `1 − abs(log10 subs_A − log10 subs_B) / log10(100)`, clamped to `[0, 1]` — 1.0 for equal size, 0 once one channel is 100× the other. Log-scaled, so a 2× gap scores the same at any absolute size. |
+| **`quality_parity`** | 0.30 | `1 − abs(f24_A − f24_B) / (f24_A + f24_B)` — how close the two 24h ad-post forecasts are (a proxy for "both convert ad views similarly"). |
+| **`day_overlap`** | 0.20 | common best-posting weekdays over `min(len_A, len_B)` — 1.0 when they share all their `best_days`. |
+| **same folder** | 0.20 | `1` if both channels are in the same folder (same niche → more relevant audience), else `0`. |
+
+The MPR Pairs table (UI card and Markdown export) lists **every pair scoring
+`MUTUAL_PR_MIN_SCORE` (0.90) or higher**, best first — not a fixed top-N
+(`MUTUAL_PR_MAX_PAIRS` is only a safety ceiling for a very large folder).
+All weights and constants are ordinary module-level values, meant to be
+retuned.
 
 ## Requirements
 

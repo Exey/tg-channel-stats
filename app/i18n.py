@@ -96,7 +96,7 @@ EN = {
     "tag_choose": "Assign this channel to a tag",
     # folder stat view
     "nav_folder_stat": "📁 Folder Stats",
-    "folder_stat_sub": "Cross-channel links and periodic stats for one folder",
+    "folder_stat_sub": "Periodic stats and a composite Rating for one folder",
     "folder_stat_pick_folder": "Folder:",
     "folder_stat_no_folders": "No folders yet — create one from the Config screen.",
     "folder_stat_empty_channels": "This folder has no channels yet.",
@@ -157,6 +157,19 @@ EN = {
     "col_forecast_week": "Week forecast",
     "col_forecast_month": "Month forecast",
     "col_best_days": "Best days to post",
+    # mutual pr — cross-channel reposts table (moved here from Folder Stats)
+    "mutual_pr_links_title": "Channel links",
+    "mutual_pr_links_hint": "Reposts between the channels shown above, detected "
+                            "from each channel's top posts. Needs \"Include "
+                            "public reposts\" enabled when a channel was fetched.",
+    "mutual_pr_links_empty": "No cross-channel reposts found.",
+    # mutual pr — MPR Pairs (card + Markdown export)
+    "mutual_pr_partners_title": "MPR Pairs",
+    "mutual_pr_partners_empty": "No channel pairs to rank yet.",
+    "mutual_pr_partners_col_a": "Channel A",
+    "mutual_pr_partners_col_b": "Channel B",
+    "mutual_pr_partners_col_days": "Common best days",
+    "mutual_pr_partners_col_forecast": "24h forecast (A / B)",
     # high-quality posts view
     "nav_content_quality": "🎯 High-Quality Posts",
     "cqi_fetch_media": "🖼 Fetch media",
@@ -496,7 +509,7 @@ RU = {
     "tag_choose": "Назначить этому каналу тег",
     # folder stat view
     "nav_folder_stat": "📁 Статистика папки",
-    "folder_stat_sub": "Связи между каналами и статистика по периодам для одной папки",
+    "folder_stat_sub": "Статистика по периодам и сводный рейтинг для одной папки",
     "folder_stat_pick_folder": "Папка:",
     "folder_stat_no_folders": "Пока нет папок — создайте на экране настроек.",
     "folder_stat_empty_channels": "В этой папке пока нет каналов.",
@@ -562,6 +575,20 @@ RU = {
     "col_forecast_week": "Прогноз неделя",
     "col_forecast_month": "Прогноз месяц",
     "col_best_days": "Лучшие дни для поста",
+    # mutual pr — таблица репостов между каналами (перенесена из «Статистики папки»)
+    "mutual_pr_links_title": "Связи каналов",
+    "mutual_pr_links_hint": "Репосты между показанными выше каналами, "
+                            "определённые по топ-постам каждого канала. "
+                            "Требует включённой опции «Публичные репосты» при "
+                            "сборе канала.",
+    "mutual_pr_links_empty": "Репостов между каналами не найдено.",
+    # mutual pr — «Пары ВП» (карточка + экспорт Markdown)
+    "mutual_pr_partners_title": "Пары ВП",
+    "mutual_pr_partners_empty": "Пока нет пар каналов для оценки.",
+    "mutual_pr_partners_col_a": "Канал A",
+    "mutual_pr_partners_col_b": "Канал B",
+    "mutual_pr_partners_col_days": "Совпадение дней",
+    "mutual_pr_partners_col_forecast": "Прогноз 24ч (A / B)",
     # high-quality posts view
     "nav_content_quality": "🎯 Лучшие посты",
     "cqi_fetch_media": "🖼 Загрузить медиа",

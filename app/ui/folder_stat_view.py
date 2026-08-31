@@ -1,15 +1,15 @@
-"""Folder Stat view: for one folder of channels, show reposts between them
-and per-period (monthly/seasonal) totals exportable as Markdown.
+"""Folder Stat view: for one folder of channels, per-period
+(monthly/seasonal/half-year/rolling-year) totals and a composite Rating,
+exportable as Markdown.
 
-Both tables are built from what's already in each channel's checkpoint, not a
-fresh Telegram fetch. The links table relies on the checkpoint's stored top-N
-sample, so it's only as complete as the top-N and "include public reposts"
-choices made when the channel was fetched. Everything in the period table —
+The cross-channel **reposts** table that used to sit at the top of this view
+now lives at the bottom of app.ui.mutual_pr_view instead (all the ad-swap
+signals on one screen). Everything in the period table —
 views/shares/reactions/viral-share and the "most viewed post" — comes from
-`distributions.monthly`, which the fetcher fills from *every* scanned post,
-so it's accurate regardless of top-N, as long as the channel was fetched
-after that field was added (older checkpoints report zero/blank there until
-refetched).
+each checkpoint's `distributions.monthly`, which the fetcher fills from
+*every* scanned post (not a fresh Telegram fetch), so it's accurate
+regardless of top-N, as long as the channel was fetched after that field
+was added (older checkpoints report zero/blank there until refetched).
 
 The month/season picker buttons are deliberately built from *every* tracked
 channel, not just the ones in the currently selected folder — so the grid of
@@ -18,7 +18,6 @@ change.
 """
 from __future__ import annotations
 
-import re
 from datetime import datetime
 
 from PySide6.QtCore import Qt, QUrl
@@ -53,11 +52,6 @@ def _parse_date(iso: str) -> datetime | None:
         return None
 
 
-def _extract_ident(link: str) -> str:
-    m = re.search(r"t\.me/(?:c/)?([^/?#\s]+)", str(link or ""))
-    return m.group(1).lower() if m else ""
-
-
 def _channel_uid(ch: dict) -> str:
     username = ch.get("username") or ""
     return f"@{username}" if username else (ch.get("channel") or ch.get("key", ""))
@@ -65,13 +59,6 @@ def _channel_uid(ch: dict) -> str:
 
 def _channel_title(ch: dict) -> str:
     return ch.get("title") or ch.get("channel") or ch.get("key", "")
-
-
-def _channel_label(ch: dict) -> str:
-    username = ch.get("username") or ""
-    if username:
-        return f"@{username}"
-    return ch.get("title") or ch.get("channel") or ch.get("key", "?")
 
 
 def _channel_avg_views(ch: dict) -> float:
@@ -185,40 +172,9 @@ class FolderStatView(QWidget):
         # actually keeps the empty-state message pinned to the top.
         page.addStretch(1)
 
-        body.addWidget(self._links_card())
         body.addWidget(self._period_card(), 1)
 
         self.page_scroll.setWidget(page_holder)
-
-    def _links_card(self) -> SectionCard:
-        card = SectionCard(self.tr_("folder_stat_links_title"))
-        self.links_card_ref = card
-
-        self.links_hint_lbl = QLabel(self.tr_("folder_stat_links_hint"))
-        self.links_hint_lbl.setObjectName("hint")
-        self.links_hint_lbl.setWordWrap(True)
-        card.body.addWidget(self.links_hint_lbl)
-
-        self.links_empty_lbl = QLabel(self.tr_("folder_stat_links_empty"))
-        self.links_empty_lbl.setObjectName("hint")
-        card.body.addWidget(self.links_empty_lbl)
-
-        self.links_table = QTableWidget(0, 5)
-        self.links_table.setHorizontalHeaderLabels([
-            self.tr_("col_link_source"), self.tr_("col_link_target"),
-            self.tr_("col_link_reposts"), self.tr_("col_views"),
-            self.tr_("col_link_example")])
-        self.links_table.verticalHeader().setVisible(False)
-        self.links_table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
-        self.links_table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
-        self.links_table.horizontalHeader().setSectionResizeMode(
-            0, QHeaderView.ResizeMode.Stretch)
-        self.links_table.horizontalHeader().setSectionResizeMode(
-            1, QHeaderView.ResizeMode.Stretch)
-        self.links_table.cellDoubleClicked.connect(self._open_link_example)
-        self.links_table.setMaximumHeight(220)   # keep the period table as the tall one
-        card.body.addWidget(self.links_table)
-        return card
 
     def _period_card(self) -> SectionCard:
         card = SectionCard(self.tr_("folder_stat_period_title"))
@@ -343,60 +299,7 @@ class FolderStatView(QWidget):
         self.empty_channels_lbl.setVisible(has_folders and not has_channels)
         self.content.setVisible(has_channels)
 
-        self._rebuild_links_table()
         self._rebuild_period_picker()
-
-    # -------------------------------------------------------------- links
-    def _collect_links(self) -> list[dict]:
-        index: dict[str, dict] = {}
-        for ch in self._channels:
-            uname = (ch.get("username") or "").lower()
-            cid = str(ch.get("info", {}).get("id") or "")
-            if uname:
-                index[uname] = ch
-            if cid:
-                index[cid] = ch
-
-        edges: dict[tuple, dict] = {}
-        for ch in self._channels:
-            for row in ch.get("rows", []) or []:
-                pub = row.get("public")
-                if not pub or pub.get("count", 0) <= 0:
-                    continue
-                for item in pub.get("items", []) or []:
-                    link = item.get("link", "")
-                    target = index.get(_extract_ident(link))
-                    if not target or target.get("key") == ch.get("key"):
-                        continue
-                    key = (ch["key"], target["key"])
-                    edge = edges.setdefault(key, {
-                        "source": _channel_label(ch), "target": _channel_label(target),
-                        "count": 0, "views": 0, "example": link,
-                    })
-                    edge["count"] += 1
-                    edge["views"] += int(item.get("views", 0) or 0)
-        return sorted(edges.values(), key=lambda e: e["count"], reverse=True)
-
-    def _rebuild_links_table(self) -> None:
-        edges = self._collect_links()
-        self.links_empty_lbl.setVisible(not edges)
-        self.links_table.setVisible(bool(edges))
-        self.links_table.setRowCount(len(edges))
-        for i, edge in enumerate(edges):
-            self.links_table.setItem(i, 0, QTableWidgetItem(edge["source"]))
-            self.links_table.setItem(i, 1, QTableWidgetItem(edge["target"]))
-            self.links_table.setItem(i, 2, QTableWidgetItem(fmt_int(edge["count"])))
-            self.links_table.setItem(i, 3, QTableWidgetItem(fmt_int(edge["views"])))
-            example = QTableWidgetItem(self.tr_("show"))
-            example.setToolTip(edge["example"])
-            example.setData(Qt.ItemDataRole.UserRole, edge["example"])
-            self.links_table.setItem(i, 4, example)
-
-    def _open_link_example(self, row: int, _col: int) -> None:
-        item = self.links_table.item(row, 4)
-        link = item.data(Qt.ItemDataRole.UserRole) if item else None
-        if link:
-            QDesktopServices.openUrl(QUrl(link))
 
     # ------------------------------------------------------------- periods
     def _collect_periods(self, mode: str) -> dict[tuple, dict]:
@@ -821,14 +724,6 @@ class FolderStatView(QWidget):
         self.pick_lbl.setText(self.tr_("folder_stat_pick_folder"))
         self.no_folders_lbl.setText(self.tr_("folder_stat_no_folders"))
         self.empty_channels_lbl.setText(self.tr_("folder_stat_empty_channels"))
-
-        self.links_card_ref.title_lbl.setText(self.tr_("folder_stat_links_title"))
-        self.links_hint_lbl.setText(self.tr_("folder_stat_links_hint"))
-        self.links_empty_lbl.setText(self.tr_("folder_stat_links_empty"))
-        self.links_table.setHorizontalHeaderLabels([
-            self.tr_("col_link_source"), self.tr_("col_link_target"),
-            self.tr_("col_link_reposts"), self.tr_("col_views"),
-            self.tr_("col_link_example")])
 
         self.period_card_ref.title_lbl.setText(self.tr_("folder_stat_period_title"))
         self.period_hint_lbl.setText(self.tr_("folder_stat_period_hint"))

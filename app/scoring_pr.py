@@ -3,6 +3,12 @@ every tracked channel with an estimated ad-post follower-gain forecast and a
 "best days to post" pick, to help decide which channels are worth trading ad
 posts with.
 
+Two layers live here: the per-channel ad-post forecast (ad_forecast and
+everything it calls), and — at the very bottom, under the "Mutual PR partner
+matching" header — the per-*pair* compatibility score behind that view's
+"MPR Pairs" / "Пары ВП" table (rank_mutual_pr_pairs), shown on screen and
+appended to its Markdown export.
+
 The app has no real ad-campaign outcome data anywhere: ChannelStore keeps one
 point-in-time snapshot per channel (no follower-history, no growth-over-time),
 and every post record stores a single final view count with no view-age
@@ -70,6 +76,7 @@ the two dominant unverified constants above.
 """
 from __future__ import annotations
 
+import math
 import re
 from datetime import datetime
 
@@ -461,3 +468,135 @@ def best_days(weekday_counts: list[int], interest_gauge: float,
     rates = [(day, (score / avg_score) if avg_score else 1.0) for day, score in scores]
     rates.sort(key=lambda dr: dr[1], reverse=True)
     return [(day, 1 + (rate - 1) * BEST_DAY_RATE_DAMPING) for day, rate in rates[:top_n]]
+
+
+# ======================================================================
+# Mutual PR partner matching
+# ======================================================================
+# Everything above forecasts what *one* channel does with an ad post. This
+# section instead scores a *pair* of channels for how good an ad swap
+# between them would be — the "MPR Pairs" / "Пары ВП" table (the on-screen
+# card and the section appended to app.ui.mutual_pr_view's Markdown export).
+#
+# It uses only metrics this app already has (followers, the 24h forecast
+# above, best_days above, and whether the two share a folder). It does NOT
+# know whether the two channels have already cross-promoted each other —
+# there's no mention graph here. When that data exists, filter those pairs
+# out before calling rank_mutual_pr_pairs (or multiply a pair's score by 0),
+# the same way an already-swapped pair adds nothing.
+#
+# The four weights are a plain weighted sum and sum to 1.0, so a pair's
+# score is directly in [0, 1]:
+#
+#     score = W_SIZE     × size_parity        (fair-exchange: similar reach)
+#           + W_QUALITY   × quality_parity     (both convert views similarly)
+#           + W_DAY       × day_overlap        (their best posting days line up)
+#           + W_FOLDER    × (1 if same folder) (same niche → relevant audience)
+#
+# Tune the weights here; they're ordinary constants on purpose.
+
+MUTUAL_PR_W_SIZE = 0.30
+MUTUAL_PR_W_QUALITY = 0.30
+MUTUAL_PR_W_DAY_OVERLAP = 0.20
+MUTUAL_PR_W_SAME_FOLDER = 0.20
+
+# Follower ratio (bigger / smaller) at which the two channels count as
+# "totally mismatched in size" — size_parity reaches 0 here and is clamped
+# from going negative. 100× ≈ a 5k channel paired with a 500k one.
+MUTUAL_PR_SIZE_MAX_RATIO = 100.0
+
+# The MPR Pairs table (UI card and Markdown export) lists every pair scoring
+# at or above this, best first — not a fixed top-N. MUTUAL_PR_MAX_PAIRS is
+# only a hard ceiling so a huge folder can't produce a runaway table.
+MUTUAL_PR_MIN_SCORE = 0.90
+MUTUAL_PR_MAX_PAIRS = 500
+
+
+def size_parity(followers_a: int, followers_b: int,
+                max_ratio: float = MUTUAL_PR_SIZE_MAX_RATIO) -> float:
+    """1.0 when both channels are the same size, ramping down to 0.0 (and
+    clamped there) once one is `max_ratio`× the other. Log-scaled, so a
+    10k/20k pair and a 100k/200k pair score the same — a 2× size gap is a
+    2× gap regardless of the absolute numbers."""
+    a = max(int(followers_a or 0), 1)
+    b = max(int(followers_b or 0), 1)
+    span = math.log10(max_ratio) or 1.0
+    return max(0.0, 1.0 - abs(math.log10(a) - math.log10(b)) / span)
+
+
+def quality_parity(forecast24_a: float, forecast24_b: float) -> float:
+    """1.0 when both channels' 24h ad-post forecasts (see ad_forecast) are
+    equal, falling toward 0 as they diverge: `1 - |a - b| / (a + b)`. The
+    24h forecast stands in for "how well this channel turns ad views into
+    followers". 0.0 when neither channel has any forecast at all."""
+    total = float(forecast24_a) + float(forecast24_b)
+    if total <= 0:
+        return 0.0
+    return 1.0 - abs(float(forecast24_a) - float(forecast24_b)) / total
+
+
+def day_overlap(best_days_a, best_days_b) -> float:
+    """Fraction of the *smaller* channel's best-posting weekdays that are
+    also a best day for the other channel — `common / min(len_a, len_b)`.
+    `best_days_*` are best_days() outputs (lists of (weekday_index, rate));
+    only the weekday index matters here. 0.0 when either list is empty."""
+    days_a = {int(d) for d, _rate in best_days_a}
+    days_b = {int(d) for d, _rate in best_days_b}
+    if not days_a or not days_b:
+        return 0.0
+    return len(days_a & days_b) / min(len(days_a), len(days_b))
+
+
+def mutual_pr_pair_score(followers_a: int, followers_b: int,
+                         forecast24_a: float, forecast24_b: float,
+                         best_days_a, best_days_b,
+                         same_folder: bool) -> dict:
+    """Compatibility of two channels for an ad swap — a dict with the four
+    component sub-scores (each in [0, 1]) plus their weighted `score`, also
+    in [0, 1] (the MUTUAL_PR_W_* weights sum to 1.0). See the section
+    header above for the formula and the deliberate limitation (no mention
+    graph — an already-swapped pair has to be excluded upstream)."""
+    sp = size_parity(followers_a, followers_b)
+    qp = quality_parity(forecast24_a, forecast24_b)
+    do = day_overlap(best_days_a, best_days_b)
+    sf = 1.0 if same_folder else 0.0
+    score = (MUTUAL_PR_W_SIZE * sp + MUTUAL_PR_W_QUALITY * qp
+             + MUTUAL_PR_W_DAY_OVERLAP * do + MUTUAL_PR_W_SAME_FOLDER * sf)
+    return {"size_parity": sp, "quality_parity": qp, "day_overlap": do,
+            "same_folder": sf, "score": score}
+
+
+def rank_mutual_pr_pairs(channels: list[dict],
+                         min_score: float = MUTUAL_PR_MIN_SCORE,
+                         max_pairs: int = MUTUAL_PR_MAX_PAIRS) -> list[dict]:
+    """Every unordered pair of `channels` that scores `min_score` or higher
+    (mutual_pr_pair_score), returned best-first. `max_pairs` is only a hard
+    ceiling for a pathologically large folder, not a target count.
+
+    Each `channels` item must carry: `followers` (int), `forecast` (the
+    ad_forecast dict, for its `"24h"` key), `best_days` (a best_days()
+    output), and `folder_id` (str or None). Anything else on the item
+    (label, link, …) is left untouched and comes back on the result's `a`
+    / `b`.
+
+    Each result item: `{"a", "b", "score", "size_parity", "quality_parity",
+    "day_overlap", "same_folder", "common_days"}` where `common_days` is
+    the sorted list of weekday indices both channels have as a best day."""
+    ranked: list[dict] = []
+    for i in range(len(channels)):
+        for j in range(i + 1, len(channels)):
+            a, b = channels[i], channels[j]
+            fid_a, fid_b = a.get("folder_id"), b.get("folder_id")
+            comp = mutual_pr_pair_score(
+                a.get("followers", 0), b.get("followers", 0),
+                (a.get("forecast") or {}).get("24h", 0.0),
+                (b.get("forecast") or {}).get("24h", 0.0),
+                a.get("best_days") or [], b.get("best_days") or [],
+                bool(fid_a) and fid_a == fid_b,
+            )
+            common = sorted({int(d) for d, _ in (a.get("best_days") or [])}
+                            & {int(d) for d, _ in (b.get("best_days") or [])})
+            if comp["score"] >= min_score:
+                ranked.append({"a": a, "b": b, "common_days": common, **comp})
+    ranked.sort(key=lambda p: p["score"], reverse=True)
+    return ranked[:max_pairs]
