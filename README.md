@@ -84,7 +84,8 @@ link list.
 - **Tags** — a lightweight one-tag-per-channel taxonomy loaded from a
   Markdown table (`| tag | long tag | description |`); edit the source `.md`
   and reload to change the tag set. Only the per-channel assignment is
-  app-owned.
+  app-owned. A shared tag is the niche signal behind MPR Pairs (folders
+  count for much less there).
 
 ### Folder Stats view (`📁`)
 
@@ -296,7 +297,7 @@ sum in `[0, 1]`:
 | **`size_parity`** | 0.30 | `1 − abs(log10 subs_A − log10 subs_B) / log10(100)`, clamped to `[0, 1]` — 1.0 for equal size, 0 once one channel is 100× the other. Log-scaled, so a 2× gap scores the same at any absolute size. |
 | **`quality_parity`** | 0.30 | `1 − abs(f24_A − f24_B) / (f24_A + f24_B)` — how close the two 24h ad-post forecasts are (a proxy for "both convert ad views similarly"). |
 | **`day_overlap`** | 0.20 | shared entries in the two channels' top-2 `best_days` over `min(len_A, len_B)` — 1.0 when both top-2 sets match. |
-| **same folder** | 0.20 | `1` if both channels are in the same folder (same niche → more relevant audience), else `0`. |
+| **`niche_affinity`** | 0.20 | `1.0` if the two channels carry the **same tag** (a real niche match), `0.30` (`MUTUAL_PR_FOLDER_NICHE`) if they only share a **folder**, else `0`. Tag-first on purpose: a folder is just sidebar organization, so a different-folder same-tag pair beats a same-folder unrelated-tag one. |
 
 The MPR Pairs table (UI card and Markdown export) lists **every pair scoring
 `MUTUAL_PR_MIN_SCORE` (0.85) or higher**, best first — not a fixed top-N

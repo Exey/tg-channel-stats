@@ -105,7 +105,8 @@ class MainWindow(QMainWindow):
         self.folder_stat = FolderStatView(self.i18n, self.folder_store, self.store)
         self.compare_charts = CompareChartsView(self.i18n)
         self.content_quality = ContentQualityView(self.i18n, self.folder_store, self.store, self.cfg)
-        self.mutual_pr = MutualPrView(self.i18n, self.folder_store, self.store)
+        self.mutual_pr = MutualPrView(self.i18n, self.folder_store, self.store,
+                                      self.tag_store)
         self.stack.addWidget(self.config_view)       # index 0
         self.stack.addWidget(self.dashboard)         # index 1
         self.stack.addWidget(self.compare)           # index 2

@@ -20,9 +20,11 @@ other people's channels, not just describe your own.
 
 Below the main table sit two more cards: **MPR Pairs** — the top channel
 pairs ranked by app.scoring_pr.rank_mutual_pr_pairs (size/engagement/timing/
-niche compatibility; the math lives there, not here), whose "best days"
-column shows each side's own best days plus a ★ for the days that suit both
-at once (mutual_best_days) — and, at the bottom, the cross-channel
+niche compatibility; the math lives there, not here — niche is tag-first,
+with a shared folder counting for much less, so cross-folder same-tag pairs
+surface), whose "best days" column shows each side's own best days plus a ★
+for the days that suit both at once (mutual_best_days) — and, at the bottom,
+the cross-channel
 **reposts** table (moved here from app.ui.folder_stat_view — who already
 reposts whom is exactly the pairs you don't need to broker a swap for).
 Both are scoped to whatever the folder filter is showing.
@@ -146,11 +148,12 @@ def _fmt_rate_pct(rate: float) -> str:
 
 class MutualPrView(QWidget):
     def __init__(self, i18n, folder_store: FolderStore, channel_store: ChannelStore,
-                parent=None) -> None:
+                tag_store=None, parent=None) -> None:
         super().__init__(parent)
         self.i18n = i18n
         self.folder_store = folder_store
         self.channel_store = channel_store
+        self.tag_store = tag_store
         self._entries: list[dict] = []
         self._rendered_entries: list[dict] = []
         self._sort_col = _TINTED_COL   # 24h forecast — see _render_table
@@ -383,9 +386,12 @@ class MutualPrView(QWidget):
             interest = channel_interest(rows, avg_views)
             forecast = ad_forecast(avg_views_settled, interest, avg_posts_per_day,
                                    total_posts, followers, viral_post_share, rows)
+            tag = (self.tag_store.tag_for_channel(data["key"])
+                   if self.tag_store is not None else None)
             self._entries.append({
                 "channel": data,
                 "folder_id": self.folder_store.folder_for_channel(data["key"]),
+                "tag": tag,
                 "followers": followers,
                 "forecast": forecast,
                 "forecast_range": ad_forecast_range(forecast),
@@ -421,6 +427,7 @@ class MutualPrView(QWidget):
                 "best_days": e["best_days"],
                 "best_days_full": e["best_days_full"],
                 "folder_id": e["folder_id"],
+                "tag": e["tag"],
             })
         return out
 

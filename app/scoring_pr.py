@@ -514,7 +514,7 @@ def best_days(weekday_counts: list[int], interest_gauge: float,
 # card and the section appended to app.ui.mutual_pr_view's Markdown export).
 #
 # It uses only metrics this app already has (followers, the 24h forecast
-# above, best_days above, and whether the two share a folder). It does NOT
+# above, best_days above, and the two channels' tag / folder). It does NOT
 # know whether the two channels have already cross-promoted each other —
 # there's no mention graph here. When that data exists, filter those pairs
 # out before calling rank_mutual_pr_pairs (or multiply a pair's score by 0),
@@ -523,17 +523,29 @@ def best_days(weekday_counts: list[int], interest_gauge: float,
 # The four weights are a plain weighted sum and sum to 1.0, so a pair's
 # score is directly in [0, 1]:
 #
-#     score = W_SIZE     × size_parity        (fair-exchange: similar reach)
-#           + W_QUALITY   × quality_parity     (both convert views similarly)
-#           + W_DAY       × day_overlap        (their best posting days line up)
-#           + W_FOLDER    × (1 if same folder) (same niche → relevant audience)
+#     score = W_SIZE     × size_parity       (fair-exchange: similar reach)
+#           + W_QUALITY   × quality_parity    (both convert views similarly)
+#           + W_DAY       × day_overlap       (their best posting days line up)
+#           + W_NICHE     × niche_affinity    (same audience — see below)
+#
+# niche_affinity is tag-first: a shared *tag* is a real niche match (1.0);
+# merely sharing a *folder* counts for much less (MUTUAL_PR_FOLDER_NICHE),
+# because a folder is just sidebar organization, not a taxonomy. This is
+# what lets a strong cross-folder pair (different folders, same tag) beat a
+# weak same-folder one (one folder, unrelated tags) — and channels with no
+# tag at all fall back to the folder-only signal.
 #
 # Tune the weights here; they're ordinary constants on purpose.
 
 MUTUAL_PR_W_SIZE = 0.30
 MUTUAL_PR_W_QUALITY = 0.30
 MUTUAL_PR_W_DAY_OVERLAP = 0.20
-MUTUAL_PR_W_SAME_FOLDER = 0.20
+MUTUAL_PR_W_NICHE = 0.20
+
+# niche_affinity value when the two channels only share a folder (no common
+# tag) — deliberately small so folder membership barely moves the score and
+# cross-folder same-tag pairs surface.
+MUTUAL_PR_FOLDER_NICHE = 0.30
 
 # Follower ratio (bigger / smaller) at which the two channels count as
 # "totally mismatched in size" — size_parity reaches 0 here and is clamped
@@ -611,10 +623,25 @@ def mutual_best_days(ranked_a, ranked_b, top_n: int = MUTUAL_BEST_DAYS_TOP_N):
     return both[:top_n]
 
 
+def niche_affinity(same_tag: bool, same_folder: bool,
+                   folder_niche: float = MUTUAL_PR_FOLDER_NICHE) -> float:
+    """How likely the two channels share an audience: `1.0` when they carry
+    the same tag (a real niche match), `folder_niche` (small) when they only
+    share a folder, else `0.0`. Tags are the taxonomy; a folder is just
+    sidebar organization, so it counts for much less — a different-folder
+    same-tag pair beats a same-folder unrelated-tag one, and untagged
+    channels fall back to the folder-only signal."""
+    if same_tag:
+        return 1.0
+    if same_folder:
+        return folder_niche
+    return 0.0
+
+
 def mutual_pr_pair_score(followers_a: int, followers_b: int,
                          forecast24_a: float, forecast24_b: float,
                          best_days_a, best_days_b,
-                         same_folder: bool) -> dict:
+                         same_folder: bool, same_tag: bool = False) -> dict:
     """Compatibility of two channels for an ad swap — a dict with the four
     component sub-scores (each in [0, 1]) plus their weighted `score`, also
     in [0, 1] (the MUTUAL_PR_W_* weights sum to 1.0). See the section
@@ -623,11 +650,11 @@ def mutual_pr_pair_score(followers_a: int, followers_b: int,
     sp = size_parity(followers_a, followers_b)
     qp = quality_parity(forecast24_a, forecast24_b)
     do = day_overlap(best_days_a, best_days_b)
-    sf = 1.0 if same_folder else 0.0
+    na = niche_affinity(same_tag, same_folder)
     score = (MUTUAL_PR_W_SIZE * sp + MUTUAL_PR_W_QUALITY * qp
-             + MUTUAL_PR_W_DAY_OVERLAP * do + MUTUAL_PR_W_SAME_FOLDER * sf)
+             + MUTUAL_PR_W_DAY_OVERLAP * do + MUTUAL_PR_W_NICHE * na)
     return {"size_parity": sp, "quality_parity": qp, "day_overlap": do,
-            "same_folder": sf, "score": score}
+            "niche": na, "score": score}
 
 
 def rank_mutual_pr_pairs(channels: list[dict],
@@ -641,12 +668,13 @@ def rank_mutual_pr_pairs(channels: list[dict],
     ad_forecast dict, for its `"24h"` key), `best_days` (a top-N best_days()
     output — drives the day-overlap score component and each side's
     headline days), `best_days_full` (a best_days(..., top_n=7) output —
-    drives `mutual_days`; falls back to `best_days` if absent), and
-    `folder_id` (str or None). Anything else on the item (label, link, …)
+    drives `mutual_days`; falls back to `best_days` if absent), `folder_id`
+    (str or None), and `tag` (str or None — a shared tag is the main niche
+    signal, see niche_affinity). Anything else on the item (label, link, …)
     is left untouched and comes back on the result's `a` / `b`.
 
     Each result item: `{"a", "b", "score", "size_parity", "quality_parity",
-    "day_overlap", "same_folder", "days_a", "days_b", "mutual_days"}` —
+    "day_overlap", "niche", "days_a", "days_b", "mutual_days"}` —
     `days_a` / `days_b` are each channel's own best weekday indices, and
     `mutual_days` are the weekday indices that work well for *both* (see
     mutual_best_days)."""
@@ -655,12 +683,14 @@ def rank_mutual_pr_pairs(channels: list[dict],
         for j in range(i + 1, len(channels)):
             a, b = channels[i], channels[j]
             fid_a, fid_b = a.get("folder_id"), b.get("folder_id")
+            tag_a, tag_b = a.get("tag"), b.get("tag")
             comp = mutual_pr_pair_score(
                 a.get("followers", 0), b.get("followers", 0),
                 (a.get("forecast") or {}).get("24h", 0.0),
                 (b.get("forecast") or {}).get("24h", 0.0),
                 a.get("best_days") or [], b.get("best_days") or [],
                 bool(fid_a) and fid_a == fid_b,
+                bool(tag_a) and tag_a == tag_b,
             )
             if comp["score"] < min_score:
                 continue
