@@ -139,6 +139,13 @@ and appends just the MPR Pairs table (`## Пары ВП`).
 - **Refresh comments** — a folder-wide action that re-reads just the comment
   count for stored posts (added after some checkpoints were fetched) without
   a full re-scan.
+- **Lean refresh** — the dashboard's **Refresh** button, and a Config-screen
+  card with a staleness list of every tracked channel (oldest fetch first,
+  with age, name and followers) plus one-click batch buttons: **Oldest 10**,
+  **1 mo+**, **3 mo+**. It's *incremental* — only the months since a channel
+  was last fetched are re-scanned and merged into the existing checkpoint,
+  so a monthly cadence re-reads ~1 month instead of the whole stored 2–3
+  year period. (A checkpoint too old to merge falls back to one full scan.)
 
 ### UI
 
@@ -368,8 +375,8 @@ main.py` in an activated venv), then:
    `-100…` ID, choose how many top posts to keep per metric and the period of
    analysis, and (optionally) enable public-repost lookup.
 3. Click **Fetch & analyze**. The channel appears in the sidebar with its
-   dashboard; **Re-fetch** to refresh it, **Export** to save a Markdown
-   report, **Remove** to drop it.
+   dashboard; **Refresh** for a lean (incremental) update, **Export** to
+   save a Markdown report, **Remove** to drop it.
 4. Group channels into folders/tags, then open the **Folder Stats**,
    **High-Quality Posts** or **Mutual PR** views from the sidebar for
    folder-wide analysis.
@@ -427,6 +434,7 @@ app/
 ├── tools/
 │   ├── channel_stat.py     # the scan: engagement ranking + activity stats
 │   ├── comments_refresh.py # re-read just the comment count for stored posts
+│   ├── lean_refresh.py     # incremental re-scan of the months since last fetch
 │   ├── media_fetch.py      # on-demand post-thumbnail download
 │   └── common.py           # entity resolution, FloodWait retries
 └── ui/

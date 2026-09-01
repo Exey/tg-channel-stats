@@ -76,6 +76,27 @@ EN = {
     "folder_assign_all_none": "No channels to assign yet — fetch one from "
                               "this screen first.",
     "folder_export_col_tag": "Tag",
+    # lean refresh (Config screen's staleness list + batch re-fetch)
+    "lean_refresh_title": "Lean refresh",
+    "lean_refresh_help": "Bring stale checkpoints up to date without a full "
+                         "re-scan — a lean refresh only re-reads the months "
+                         "since each channel was last fetched and merges them "
+                         "in. Progress and log show in the Fetch panel above.",
+    "lean_refresh_oldest_btn": "Oldest 10",
+    "lean_refresh_oldest_hint": "Lean-refresh the 10 least-recently-updated "
+                                "channels.",
+    "lean_refresh_1mo_btn": "1 mo+",
+    "lean_refresh_1mo_hint": "Lean-refresh every channel last updated more "
+                             "than a month ago.",
+    "lean_refresh_3mo_btn": "3 mo+",
+    "lean_refresh_3mo_hint": "Lean-refresh every channel last updated more "
+                             "than 3 months ago.",
+    "lean_refresh_confirm": "Lean-refresh {count} channel(s)?",
+    "lean_refresh_none": "Nothing that stale — every channel is more recent "
+                         "than that.",
+    "lean_refresh_empty": "No channels tracked yet.",
+    "lean_refresh_col_updated": "Updated",
+    "lean_refresh_col_channel": "Channel",
     # tags (Config screen's Tags card, sidebar badges, dashboard's tag button)
     "tag_section_title": "Tags",
     "tag_manage_help": "Load a Markdown table (| tag | long tag | description "
@@ -334,7 +355,10 @@ EN = {
     # dashboard header
     "dash_download": "Export",
     "dash_fetched_at": "Fetched {when}",
-    "dash_refresh": "🔄 Re-fetch",
+    "dash_refresh": "🔄 Refresh",
+    "dash_refresh_hint": "Lean refresh — re-scans only the months since this "
+                         "channel was last fetched and merges them in, not "
+                         "the whole stored period.",
     "dash_remove": "🗑 Remove",
     "dash_remove_confirm": "Remove “{name}” from the sidebar? "
                            "(The stored checkpoint file is deleted.)",
@@ -489,6 +513,25 @@ RU = {
                                  "они сейчас находятся.",
     "folder_assign_all_none": "Пока нет каналов для назначения — сначала "
                               "загрузите канал на этом экране.",
+    # lean refresh (список устаревших + массовое обновление на экране настроек)
+    "lean_refresh_title": "Лёгкое обновление",
+    "lean_refresh_help": "Обновить устаревшие данные без полного пересканирования "
+                         "— лёгкое обновление перечитывает только месяцы, "
+                         "прошедшие с последней загрузки канала, и досливает "
+                         "их. Прогресс и лог — в панели загрузки выше.",
+    "lean_refresh_oldest_btn": "Старые 10",
+    "lean_refresh_oldest_hint": "Обновить 10 каналов с самой давней датой "
+                                "обновления.",
+    "lean_refresh_1mo_btn": "1 мес+",
+    "lean_refresh_1mo_hint": "Обновить все каналы, не обновлявшиеся более месяца.",
+    "lean_refresh_3mo_btn": "3 мес+",
+    "lean_refresh_3mo_hint": "Обновить все каналы, не обновлявшиеся более 3 "
+                             "месяцев.",
+    "lean_refresh_confirm": "Обновить {count} канал(ов)?",
+    "lean_refresh_none": "Нет настолько старых — все каналы свежее.",
+    "lean_refresh_empty": "Пока нет отслеживаемых каналов.",
+    "lean_refresh_col_updated": "Обновлён",
+    "lean_refresh_col_channel": "Канал",
     "folder_export_col_tag": "Тег",
     # tags (карточка «Теги» на экране настроек, значки в боковой панели,
     # кнопка тега в дашборде)
@@ -752,6 +795,9 @@ RU = {
     "dash_download": "Экспорт",
     "dash_fetched_at": "Загружено {when}",
     "dash_refresh": "🔄 Обновить",
+    "dash_refresh_hint": "Лёгкое обновление — перечитывает только месяцы, "
+                         "прошедшие с последней загрузки канала, и досливает "
+                         "их, а не весь сохранённый период.",
     "dash_remove": "🗑 Удалить",
     "dash_remove_confirm": "Убрать «{name}» из боковой панели? "
                            "(Файл контрольной точки будет удалён.)",

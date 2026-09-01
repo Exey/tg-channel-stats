@@ -8,15 +8,16 @@ from __future__ import annotations
 
 import html
 import json
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from PySide6.QtCore import Qt, QUrl, Signal
 from PySide6.QtGui import QDesktopServices
 from PySide6.QtWidgets import (
-    QCheckBox, QComboBox, QFileDialog, QFormLayout, QGroupBox, QHBoxLayout,
-    QInputDialog, QLabel, QLineEdit, QMessageBox, QPlainTextEdit, QProgressBar,
-    QPushButton, QScrollArea, QVBoxLayout, QWidget,
+    QAbstractItemView, QCheckBox, QComboBox, QFileDialog, QFormLayout, QGroupBox,
+    QHBoxLayout, QHeaderView, QInputDialog, QLabel, QLineEdit, QMessageBox,
+    QPlainTextEdit, QProgressBar, QPushButton, QScrollArea, QTableWidget,
+    QTableWidgetItem, QVBoxLayout, QWidget,
 )
 
 from ..config import CONN_FIELDS, config_dir
@@ -29,6 +30,7 @@ from ..store import ChannelStore
 from ..tags import TagStore
 from ..tools.channel_stat import run_channel_stat
 from ..tools.comments_refresh import run_comments_refresh
+from ..tools.lean_refresh import run_lean_refresh
 from ..worker import CheckLoginWorker, ToolWorker
 from .dashboard_view import fmt_int
 from .folder_dialog import FolderManagerDialog
@@ -98,7 +100,13 @@ class ConfigView(QWidget):
         taxonomy_row.addWidget(self._folders_card(), 1)
         taxonomy_row.addWidget(self._tags_card(), 1)
         root.addLayout(taxonomy_row)
+        root.addWidget(self._lean_refresh_card())
         root.addStretch()
+
+        # Every button that must be greyed out while a background worker runs
+        # (the fetch/comments/lean jobs all share self.worker).
+        self._busy_btns = [self.fetch_btn, self.refresh_comments_btn,
+                           self.lean_oldest_btn, self.lean_1mo_btn, self.lean_3mo_btn]
 
     def _connection_card(self) -> Card:
         card = SectionCard("Telegram")
@@ -337,6 +345,172 @@ class ConfigView(QWidget):
 
         self.refresh_tags_list()
         return card
+
+    # ------------------------------------------------------- lean refresh
+    def _lean_refresh_card(self) -> Card:
+        """Staleness list of every tracked channel (oldest fetch first) plus
+        one-click batch re-fetch of the stale ones — incremental, only the
+        months since each was last fetched (see tools.lean_refresh)."""
+        card = SectionCard(self.tr_("lean_refresh_title"))
+        self.lean_card_ref = card
+
+        self.lean_help_lbl = QLabel(self.tr_("lean_refresh_help"))
+        self.lean_help_lbl.setObjectName("hint")
+        self.lean_help_lbl.setWordWrap(True)
+        card.body.addWidget(self.lean_help_lbl)
+
+        btn_row = QHBoxLayout()
+        self.lean_oldest_btn = QPushButton(self.tr_("lean_refresh_oldest_btn"))
+        self.lean_oldest_btn.setToolTip(self.tr_("lean_refresh_oldest_hint"))
+        self.lean_oldest_btn.clicked.connect(lambda: self._on_lean_refresh_clicked("oldest10"))
+        btn_row.addWidget(self.lean_oldest_btn)
+        self.lean_1mo_btn = QPushButton(self.tr_("lean_refresh_1mo_btn"))
+        self.lean_1mo_btn.setToolTip(self.tr_("lean_refresh_1mo_hint"))
+        self.lean_1mo_btn.clicked.connect(lambda: self._on_lean_refresh_clicked("1mo"))
+        btn_row.addWidget(self.lean_1mo_btn)
+        self.lean_3mo_btn = QPushButton(self.tr_("lean_refresh_3mo_btn"))
+        self.lean_3mo_btn.setToolTip(self.tr_("lean_refresh_3mo_hint"))
+        self.lean_3mo_btn.clicked.connect(lambda: self._on_lean_refresh_clicked("3mo"))
+        btn_row.addWidget(self.lean_3mo_btn)
+        btn_row.addStretch()
+        card.body.addLayout(btn_row)
+
+        self.lean_empty_lbl = QLabel(self.tr_("lean_refresh_empty"))
+        self.lean_empty_lbl.setObjectName("hint")
+        card.body.addWidget(self.lean_empty_lbl)
+
+        self.lean_table = QTableWidget(0, 3)
+        self._set_lean_headers()
+        self.lean_table.verticalHeader().setVisible(False)
+        self.lean_table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
+        self.lean_table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
+        lean_header = self.lean_table.horizontalHeader()
+        lean_header.setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
+        self.lean_table.setColumnWidth(0, 150)
+        self.lean_table.setColumnWidth(2, 110)
+        self.lean_table.setMaximumHeight(260)
+        card.body.addWidget(self.lean_table)
+
+        self.refresh_lean_list()
+        return card
+
+    def _set_lean_headers(self) -> None:
+        self.lean_table.setHorizontalHeaderLabels([
+            self.tr_("lean_refresh_col_updated"), self.tr_("lean_refresh_col_channel"),
+            self.tr_("col_followers")])
+
+    @staticmethod
+    def _utcnow() -> datetime:
+        return datetime.now(timezone.utc).replace(tzinfo=None)
+
+    @staticmethod
+    def _parse_fetched_at(value: str) -> datetime | None:
+        try:
+            dt = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+        except (TypeError, ValueError):
+            return None
+        return dt.replace(tzinfo=None) if dt.tzinfo else dt
+
+    def _lean_rows_sorted(self) -> list[dict]:
+        """Every checkpoint summary, oldest fetch first (an unparseable /
+        missing fetched_at sorts to the very top — most in need of a look)."""
+        return sorted(self.channel_store.list(), key=lambda d: d.get("fetched_at") or "")
+
+    def refresh_lean_list(self) -> None:
+        rows = self._lean_rows_sorted()
+        self.lean_empty_lbl.setVisible(not rows)
+        self.lean_table.setVisible(bool(rows))
+        self.lean_table.setRowCount(len(rows))
+        now = self._utcnow()
+        for i, ch in enumerate(rows):
+            dt = self._parse_fetched_at(ch.get("fetched_at", ""))
+            if dt is not None:
+                updated = f"{dt:%Y-%m-%d} ({max(0, (now - dt).days)}d)"
+            else:
+                updated = ch.get("fetched_at") or "—"
+            self.lean_table.setItem(i, 0, QTableWidgetItem(updated))
+            self.lean_table.setItem(i, 1, QTableWidgetItem(_channel_display_name(ch)))
+            self.lean_table.setItem(i, 2, QTableWidgetItem(fmt_int(ch.get("members", 0))))
+
+    def _lean_candidates(self, mode: str) -> list[dict]:
+        rows = self._lean_rows_sorted()
+        if mode == "oldest10":
+            return rows[:10]
+        days = 30 if mode == "1mo" else 91
+        cutoff = self._utcnow() - timedelta(days=days)
+        out = []
+        for ch in rows:
+            dt = self._parse_fetched_at(ch.get("fetched_at", ""))
+            if dt is None or dt < cutoff:
+                out.append(ch)
+        return out
+
+    def _on_lean_refresh_clicked(self, mode: str) -> None:
+        cands = self._lean_candidates(mode)
+        if not cands:
+            QMessageBox.information(self, self.tr_("app_title"),
+                                   self.tr_("lean_refresh_none"))
+            return
+        if self.is_running():
+            QMessageBox.warning(self, self.tr_("app_title"), self.tr_("worker_running"))
+            return
+        reply = QMessageBox.question(
+            self, self.tr_("app_title"),
+            self.tr_("lean_refresh_confirm", count=len(cands)))
+        if reply != QMessageBox.StandardButton.Yes:
+            return
+        self.lean_refresh([ch["key"] for ch in cands])
+
+    def lean_refresh(self, keys: list[str]) -> bool:
+        """Start a lean (incremental) refresh of `keys` — the months since
+        each was last fetched, merged in (see tools.lean_refresh). Shared by
+        the Config card's batch buttons and the dashboard's Refresh button.
+        Returns True if a worker was started."""
+        keys = [k for k in keys if k]
+        if not keys:
+            return False
+        self._store_fields()
+        if not self._has_conn():
+            QMessageBox.warning(self, self.tr_("app_title"), self.tr_("missing_conn"))
+            return False
+        if self.is_running():
+            QMessageBox.warning(self, self.tr_("app_title"), self.tr_("worker_running"))
+            return False
+
+        self.log_view.clear()
+        conn = {
+            "api_id": self.cfg.get("API_ID").strip(),
+            "api_hash": self.cfg.get("API_HASH").strip(),
+            "phone": self.cfg.get("PHONE_NUMBER").strip(),
+            "session": self.cfg.session_path(),
+        }
+        self.worker = ToolWorker(run_lean_refresh, {"keys": keys}, conn, parent=self)
+        self.worker.sig_log.connect(self._append_log)
+        self.worker.sig_progress.connect(self._on_progress)
+        self.worker.sig_ask.connect(self._on_ask)
+        self.worker.sig_done.connect(self._on_lean_refresh_done)
+        self._set_busy(True)
+        self.progress.setRange(0, 0)
+        self.worker.start()
+        return True
+
+    def _on_lean_refresh_done(self, ok: bool, msg: str) -> None:
+        self._set_busy(False)
+        if self.progress.maximum() == 0:
+            self.progress.setRange(0, 1)
+            self.progress.setValue(1 if ok else 0)
+        self.worker = None
+        self.refresh_lean_list()
+        if not ok:
+            self._append_log(self.tr_("done_fail", msg=msg))
+        # Each channel is saved as it finishes, so even a cancelled/failed
+        # run has changed data on disk — always resync.
+        self.checkpoints_changed.emit()
+
+    def _set_busy(self, busy: bool) -> None:
+        for btn in self._busy_btns:
+            btn.setEnabled(not busy)
+        self.stop_btn.setEnabled(busy)
 
     def refresh_tags_list(self) -> None:
         """One tag per line, biggest tag (most assigned channels) first,
@@ -711,6 +885,18 @@ class ConfigView(QWidget):
         self.tags_load_btn.setToolTip(self.tr_("tag_load_md_hint"))
         self.refresh_tags_list()
 
+        self.lean_card_ref.title_lbl.setText(self.tr_("lean_refresh_title"))
+        self.lean_help_lbl.setText(self.tr_("lean_refresh_help"))
+        self.lean_oldest_btn.setText(self.tr_("lean_refresh_oldest_btn"))
+        self.lean_oldest_btn.setToolTip(self.tr_("lean_refresh_oldest_hint"))
+        self.lean_1mo_btn.setText(self.tr_("lean_refresh_1mo_btn"))
+        self.lean_1mo_btn.setToolTip(self.tr_("lean_refresh_1mo_hint"))
+        self.lean_3mo_btn.setText(self.tr_("lean_refresh_3mo_btn"))
+        self.lean_3mo_btn.setToolTip(self.tr_("lean_refresh_3mo_hint"))
+        self.lean_empty_lbl.setText(self.tr_("lean_refresh_empty"))
+        self._set_lean_headers()
+        self.refresh_lean_list()
+
     # ------------------------------------------------------ field helpers
     def _load_fields(self) -> None:
         for key, edit in self.edits.items():
@@ -864,9 +1050,7 @@ class ConfigView(QWidget):
         self.worker.sig_ask.connect(self._on_ask)
         self.worker.sig_done.connect(self._on_fetch_done)
 
-        self.fetch_btn.setEnabled(False)
-        self.refresh_comments_btn.setEnabled(False)
-        self.stop_btn.setEnabled(True)
+        self._set_busy(True)
         self.progress.setRange(0, 0)
         self.worker.start()
 
@@ -902,9 +1086,7 @@ class ConfigView(QWidget):
             self.worker.request_cancel()
 
     def _on_fetch_done(self, ok: bool, msg: str) -> None:
-        self.fetch_btn.setEnabled(True)
-        self.refresh_comments_btn.setEnabled(True)
-        self.stop_btn.setEnabled(False)
+        self._set_busy(False)
         payload = None
         if ok:
             try:
@@ -976,20 +1158,17 @@ class ConfigView(QWidget):
         self.worker.sig_ask.connect(self._on_ask)
         self.worker.sig_done.connect(self._on_refresh_comments_done)
 
-        self.fetch_btn.setEnabled(False)
-        self.refresh_comments_btn.setEnabled(False)
-        self.stop_btn.setEnabled(True)
+        self._set_busy(True)
         self.progress.setRange(0, 0)
         self.worker.start()
 
     def _on_refresh_comments_done(self, ok: bool, msg: str) -> None:
-        self.fetch_btn.setEnabled(True)
-        self.refresh_comments_btn.setEnabled(True)
-        self.stop_btn.setEnabled(False)
+        self._set_busy(False)
         if self.progress.maximum() == 0:
             self.progress.setRange(0, 1)
             self.progress.setValue(1 if ok else 0)
         self.worker = None
+        self.refresh_lean_list()
         if ok:
             self.checkpoints_changed.emit()
         else:

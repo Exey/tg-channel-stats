@@ -162,7 +162,7 @@ class ChannelReportDialog(QDialog):
 # ------------------------------------------------------------- dashboard
 
 class DashboardView(QWidget):
-    refetch_requested = Signal(dict)
+    refetch_requested = Signal(str)   # checkpoint key — a lean (incremental) refresh
     remove_requested = Signal(str)
     folders_changed = Signal()
     tags_changed = Signal()
@@ -241,6 +241,7 @@ class DashboardView(QWidget):
         self.md_btn.clicked.connect(self._save_md)
         head.addWidget(self.md_btn)
         self.refetch_btn = QPushButton(self.tr_("dash_refresh"))
+        self.refetch_btn.setToolTip(self.tr_("dash_refresh_hint"))
         self.refetch_btn.clicked.connect(self._on_refetch)
         head.addWidget(self.refetch_btn)
         self.remove_btn = QPushButton(self.tr_("dash_remove"))
@@ -1055,12 +1056,9 @@ class DashboardView(QWidget):
     def _on_refetch(self) -> None:
         if not self._data:
             return
-        self.refetch_requested.emit({
-            "channel": self._data.get("channel", self._channel_text),
-            "top_n": self._data.get("top_n", 20),
-            "period": self._data.get("period", ""),
-            "fetch_public": self._data.get("fetch_public", False),
-        })
+        key = self._data.get("key") or ""
+        if key:
+            self.refetch_requested.emit(key)
 
     def _on_remove(self) -> None:
         if not self._data:
@@ -1197,6 +1195,7 @@ class DashboardView(QWidget):
         self.report_btn.setText(self.tr_("report_button"))
         self.md_btn.setText(self.tr_("save_md_button"))
         self.refetch_btn.setText(self.tr_("dash_refresh"))
+        self.refetch_btn.setToolTip(self.tr_("dash_refresh_hint"))
         self.remove_btn.setText(self.tr_("dash_remove"))
         self.trend_card.title_lbl.setText(self.tr_("chart_trend_title"))
         self.trend_trim_edges_chk.setText(self.tr_("chart_trim_edges"))

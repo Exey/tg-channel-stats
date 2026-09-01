@@ -36,6 +36,7 @@ class MainWindow(QMainWindow):
         self.resize(1240, 860)
         self.setMinimumSize(1040, 720)
         self._current_key: str | None = None   # None => Config screen
+        self._refetch_return_key: str | None = None  # dashboard to re-open after a lean refresh
         self._sidebar_folded = False
         apply_theme(QApplication.instance(), self.cfg.theme)
         self._build_ui()
@@ -95,7 +96,7 @@ class MainWindow(QMainWindow):
         self.config_view.channel_fetched.connect(self._on_channel_fetched)
         self.config_view.folders_changed.connect(self._on_folders_changed)
         self.config_view.tags_changed.connect(self._on_folders_changed)
-        self.config_view.checkpoints_changed.connect(self._refresh_sidebar)
+        self.config_view.checkpoints_changed.connect(self._on_checkpoints_changed)
         self.dashboard = DashboardView(self.i18n, self.folder_store, self.tag_store, self.cfg)
         self.dashboard.refetch_requested.connect(self._on_refetch)
         self.dashboard.remove_requested.connect(self._on_remove)
@@ -176,6 +177,7 @@ class MainWindow(QMainWindow):
     # ------------------------------------------------------------- sidebar
     def _refresh_sidebar(self) -> None:
         self.side.set_channels(self.store.list())
+        self.config_view.refresh_lean_list()
         self.folder_stat.refresh()
         self.content_quality.refresh()
         self.mutual_pr.refresh()
@@ -279,9 +281,18 @@ class MainWindow(QMainWindow):
         self._refresh_sidebar()
         self._show_channel(key)
 
-    def _on_refetch(self, params: dict) -> None:
+    def _on_refetch(self, key: str) -> None:
+        """Dashboard Refresh button — a lean (incremental) refresh of just
+        this channel, then re-open its dashboard when it finishes."""
         self._show_config()
-        self.config_view.fetch(params)
+        if self.config_view.lean_refresh([key]):
+            self._refetch_return_key = key
+
+    def _on_checkpoints_changed(self) -> None:
+        self._refresh_sidebar()
+        key, self._refetch_return_key = self._refetch_return_key, None
+        if key and self.side.has_channel(key):
+            self._show_channel(key)
 
     def _on_remove(self, key: str) -> None:
         self.store.delete(key)
