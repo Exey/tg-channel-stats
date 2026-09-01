@@ -1,8 +1,10 @@
 name: Build binaries
 
-# macOS is intentionally NOT built here: it costs 10x the Actions minutes
-# Windows/Linux do, and it's built locally instead (see build.sh) — the
-# .app from that local build gets attached to releases by hand.
+# macOS here is the arm64 (Apple Silicon) build — macos-latest runners cost
+# ~10x the Actions minutes Windows/Linux do, so if minutes are tight this
+# job can be dropped and the .app built locally instead (see build.sh).
+# Nothing here is code-signed with a Developer ID or notarized, so every
+# platform's binary is "from an unidentified developer" on first launch.
 on:
   push:
     branches: [main]
@@ -18,6 +20,8 @@ jobs:
             artifact_name: windows
           - os: ubuntu-latest
             artifact_name: linux
+          - os: macos-latest
+            artifact_name: macos
     runs-on: ${{ matrix.os }}
 
     steps:
@@ -50,6 +54,18 @@ jobs:
 
       - name: Build binary
         run: python build.py
+
+      # PyInstaller emits a .app *bundle* (a directory) on macOS plus the
+      # --onedir folder it's built from. Zip the .app so it survives the
+      # download as one file with its symlinks/permissions intact, then drop
+      # the loose bundle + folder so the upload step only sees the zip.
+      - name: Package .app (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          cd dist
+          app=$(ls -d tg-channel-stats_*.app)
+          ditto -c -k --keepParent "$app" "${app%.app}_macos.zip"
+          rm -rf "$app" "${app%.app}"
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
