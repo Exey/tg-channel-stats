@@ -38,6 +38,7 @@ from .qr_login_dialog import QrLoginDialog
 from .widgets import Card, SectionCard
 
 PERIOD_KEYS = ["2y", "3y", "all"]
+_THEME_PREFS = ["system", "light", "dark"]
 
 
 def _channel_display_name(ch: dict) -> str:
@@ -50,6 +51,8 @@ class ConfigView(QWidget):
     folders_changed = Signal()
     tags_changed = Signal()
     checkpoints_changed = Signal()   # a folder's checkpoints were updated in place
+    worker_started = Signal()        # a background job began — bring this screen up
+    theme_change_requested = Signal(str)  # "system" | "light" | "dark"
 
     def __init__(self, cfg, i18n, folder_store: FolderStore, tag_store: TagStore,
                 channel_store: ChannelStore, parent=None) -> None:
@@ -95,13 +98,14 @@ class ConfigView(QWidget):
         root.addWidget(self._connection_card())
         root.addWidget(self._fetch_card())
         root.addWidget(self._instructions_card())
-        taxonomy_row = QHBoxLayout()
-        taxonomy_row.setSpacing(18)
-        taxonomy_row.addWidget(self._folders_card(), 1)
-        taxonomy_row.addWidget(self._tags_card(), 1)
-        root.addLayout(taxonomy_row)
         root.addWidget(self._lean_refresh_card())
         root.addStretch()
+
+        # Built here (this view owns all the folder/tag logic + the worker the
+        # comments-refresh needs) but mounted at the top of the Folders & Tags
+        # view — see MainWindow._build_ui / FolderStatView.mount_taxonomy_cards.
+        self.folders_card = self._folders_card()
+        self.tags_card = self._tags_card()
 
         # Every button that must be greyed out while a background worker runs
         # (the fetch/comments/lean jobs all share self.worker).
@@ -157,6 +161,17 @@ class ConfigView(QWidget):
         self.status.setWordWrap(True)
         card.body.addWidget(self.status)
 
+        theme_row = QHBoxLayout()
+        self.theme_lbl = QLabel(self.tr_("menu_theme"))
+        theme_row.addWidget(self.theme_lbl)
+        self.theme_combo = QComboBox()
+        self.theme_combo.addItems(
+            [self.tr_(f"theme_{p}") for p in _THEME_PREFS])
+        self.sync_theme_combo()
+        self.theme_combo.currentIndexChanged.connect(self._on_theme_combo_changed)
+        theme_row.addWidget(self.theme_combo, 1)
+        card.body.addLayout(theme_row)
+
         loc_row = QHBoxLayout()
         self.loc_lbl = QLabel(self.tr_("config_location", path=str(self.cfg.path)))
         self.loc_lbl.setObjectName("hint")
@@ -171,6 +186,16 @@ class ConfigView(QWidget):
 
     def _open_config_folder(self) -> None:
         QDesktopServices.openUrl(QUrl.fromLocalFile(str(config_dir())))
+
+    def sync_theme_combo(self) -> None:
+        pref = self.cfg.theme if self.cfg.theme in _THEME_PREFS else "system"
+        self.theme_combo.blockSignals(True)
+        self.theme_combo.setCurrentIndex(_THEME_PREFS.index(pref))
+        self.theme_combo.blockSignals(False)
+
+    def _on_theme_combo_changed(self, index: int) -> None:
+        if 0 <= index < len(_THEME_PREFS):
+            self.theme_change_requested.emit(_THEME_PREFS[index])
 
     def _fetch_card(self) -> Card:
         card = SectionCard(self.tr_("fetch_title"))
@@ -316,6 +341,11 @@ class ConfigView(QWidget):
         assign_all_row.addWidget(self.assign_all_btn)
         card.body.addLayout(assign_all_row)
 
+        # Keep the contents packed at the top — when this card is narrower
+        # (and so taller) than the Tags card beside it, or vice-versa, the
+        # shorter one shouldn't spread its rows to fill the leftover height.
+        card.body.addStretch(1)
+
         self.refresh_folders_list()
         return card
 
@@ -342,6 +372,7 @@ class ConfigView(QWidget):
         row.addWidget(self.tags_load_btn)
         row.addStretch()
         card.body.addLayout(row)
+        card.body.addStretch(1)   # keep contents top-aligned — see _folders_card
 
         self.refresh_tags_list()
         return card
@@ -388,7 +419,7 @@ class ConfigView(QWidget):
         lean_header.setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
         self.lean_table.setColumnWidth(0, 150)
         self.lean_table.setColumnWidth(2, 110)
-        self.lean_table.setMaximumHeight(260)
+        self.lean_table.setMaximumHeight(520)
         card.body.addWidget(self.lean_table)
 
         self.refresh_lean_list()
@@ -511,6 +542,10 @@ class ConfigView(QWidget):
         for btn in self._busy_btns:
             btn.setEnabled(not busy)
         self.stop_btn.setEnabled(busy)
+        if busy:
+            # Bring the Config screen up so its progress bar / log are visible
+            # even when the job was kicked off from another view's card.
+            self.worker_started.emit()
 
     def refresh_tags_list(self) -> None:
         """One tag per line, biggest tag (most assigned channels) first,
@@ -845,6 +880,12 @@ class ConfigView(QWidget):
         self.check_login_btn.setText(self.tr_("check_login_button"))
         self.loc_lbl.setText(self.tr_("config_location", path=str(self.cfg.path)))
         self.open_folder_btn.setText(self.tr_("open_config_folder"))
+        self.theme_lbl.setText(self.tr_("menu_theme"))
+        self.theme_combo.blockSignals(True)
+        for i, p in enumerate(_THEME_PREFS):
+            self.theme_combo.setItemText(i, self.tr_(f"theme_{p}"))
+        self.theme_combo.blockSignals(False)
+        self.sync_theme_combo()
 
         self.fetch_card_ref.title_lbl.setText(self.tr_("fetch_title"))
         self.fetch_help_lbl.setText(self.tr_("fetch_help"))

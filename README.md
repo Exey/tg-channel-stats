@@ -75,24 +75,26 @@ link list.
   stacked trend charts (Quality, Views, Shares, Reactions, Posts), sharing
   one month/season toggle.
 
-### Folders & tags
+### Folders & Tags view (`📁`)
 
-- **Folders** — user-defined groups with a color, managed in-app. Assign
-  channels from the sidebar's right-click menu, the dashboard's folder
-  button, or Config's "assign every channel to a folder" bulk action. The
-  sidebar can group and sort by folder.
+The **Folders** and **Tags** cards sit at the top:
+
+- **Folders** — user-defined colored groups, managed in-app. Assign channels
+  from the sidebar's right-click menu, the dashboard's folder button, or the
+  "assign every channel to a folder" bulk action here. The sidebar can group
+  and sort by folder. Also here: a **Markdown export** (one row per channel,
+  optionally with per-period Rating / Views / Viral share) and **Refresh
+  comments** (re-read just the comment count for a folder's channels).
 - **Tags** — a lightweight one-tag-per-channel taxonomy loaded from a
   Markdown table (`| tag | long tag | description |`); edit the source `.md`
   and reload to change the tag set. Only the per-channel assignment is
   app-owned. A shared tag is the niche signal behind MPR Pairs (folders
   count for much less there).
 
-### Folder Stats view (`📁`)
-
-For one folder and one period (monthly / seasonal / half-year / rolling-year
-window): **periodic stats** — per-channel views / shares / reactions /
-viral-share, the period's most-viewed post, **Post Quality**, and a
-composite **Rating** (see [rating.py](#composite-channel-rating)),
+Below that, for one folder and one period (monthly / seasonal / half-year /
+rolling-year window): **periodic stats** — per-channel views / shares /
+reactions / viral-share, the period's most-viewed post, **Post Quality**,
+and a composite **Rating** (see [rating.py](#composite-channel-rating)),
 exportable as Markdown. (The cross-channel reposts table that used to live
 here now sits at the bottom of the Mutual PR view.)
 
@@ -125,7 +127,7 @@ an ad swap by size / engagement / timing / niche compatibility, with a
 days that suit both at once (see
 [scoring_pr.py](#mutual-pr-partner-matching)) — and, at the bottom, the
 **cross-channel reposts** table (who already reposts whom — moved here from
-Folder Stats). The **Markdown export** keeps the main forecast table intact
+the Folders & Tags view). The **Markdown export** keeps the main forecast table intact
 and appends just the MPR Pairs table (`## Пары ВП`).
 
 ### Login, profiles, connection settings
@@ -136,9 +138,9 @@ and appends just the MPR Pairs table (`## Пары ВП`).
 - **Named profiles** — keep several accounts/API keys side by side.
 - **`.env` import/export** of connection settings (also understands
   `TG_API_ID` / `TG_API_HASH` / `TG_PHONE` naming).
-- **Refresh comments** — a folder-wide action that re-reads just the comment
-  count for stored posts (added after some checkpoints were fetched) without
-  a full re-scan.
+- **Refresh comments** — a folder-wide action (on the Folders & Tags view)
+  that re-reads just the comment count for stored posts (added after some
+  checkpoints were fetched) without a full re-scan.
 - **Lean refresh** — the dashboard's **Refresh** button, and a Config-screen
   card with a staleness list of every tracked channel (oldest fetch first,
   with age, name and followers) plus one-click batch buttons: **Oldest 10**,
@@ -152,7 +154,8 @@ and appends just the MPR Pairs table (`## Пары ВП`).
 - **Bilingual** — English and Russian, switchable at runtime with no widget
   rebuild (a running fetch and unsaved fields survive the switch).
 - **Light / Dark theme** — follows the OS appearance by default (and updates
-  live if you flip it), or pin Light/Dark from the **Theme** menu.
+  live if you flip it), or pin System / Light / Dark from the **Theme** menu
+  or the picker on the Config screen.
 - Telegram work runs on a background thread, so the GUI never freezes; scans
   are cancellable. Rate limits (FloodWait) and transient network errors are
   retried automatically with backoff.
@@ -182,7 +185,7 @@ checkpoint's `stats`:
 `app/scoring.py` ranks individual posts by *proportional* engagement — how much a post
 punched above its own reach — not by raw views. Shared by the High-Quality
 Posts grid, the dashboard's Quality trend line and post cards, and the
-Folder Stats "Post Quality" column; it also feeds the Rating's quality term
+Folders & Tags "Post Quality" column; it also feeds the Rating's quality term
 and Mutual PR's "Interest".
 
 Per post, given the post's `views`, `reactions`, `forwards`, `comments`, and
@@ -211,8 +214,8 @@ forwards (a deliberate, costly share) first, then comments, then reactions
 
 ### Composite channel Rating
 
-`app/rating.py` produces a per-channel-per-period score in `[0, 1]`, shown in the Folder Stats
-"Rating" column and reused verbatim by Config's Folders MD export. Channels
+`app/rating.py` produces a per-channel-per-period score in `[0, 1]`, shown in the Folders & Tags view's
+"Rating" column and reused verbatim by that view's Folders MD export. Channels
 are grouped by folder and each channel is normalized against **only its own
 folder's peers** for the same period.
 
@@ -377,9 +380,8 @@ main.py` in an activated venv), then:
 3. Click **Fetch & analyze**. The channel appears in the sidebar with its
    dashboard; **Refresh** for a lean (incremental) update, **Export** to
    save a Markdown report, **Remove** to drop it.
-4. Group channels into folders/tags, then open the **Folder Stats**,
-   **High-Quality Posts** or **Mutual PR** views from the sidebar for
-   folder-wide analysis.
+4. Open **Folders & Tags** from the sidebar to group channels, then use the
+   **High-Quality Posts** or **Mutual PR** views for folder-wide analysis.
 
 **Which channels can I analyze?** Any public channel by `@username`, or a
 private one you're a member of by its `-100…` ID or `t.me` link.
@@ -443,7 +445,7 @@ app/
     ├── dashboard_view.py      # stat cards, charts, post cards, top-posts table, export
     ├── compare_view.py        # side-by-side stat cards for 2-8 channels
     ├── compare_charts_view.py  # overlaid trend charts for up to 8 channels
-    ├── folder_stat_view.py    # cross-channel reposts + periodic stats + Rating
+    ├── folder_stat_view.py    # Folders & Tags: hosts the folder/tag cards + periodic stats + Rating
     ├── content_quality_view.py # High-Quality Posts grid
     ├── mutual_pr_view.py      # ad-swap follower-gain forecast table
     ├── folder_dialog.py       # folder manager dialog

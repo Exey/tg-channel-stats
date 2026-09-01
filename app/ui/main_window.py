@@ -97,6 +97,8 @@ class MainWindow(QMainWindow):
         self.config_view.folders_changed.connect(self._on_folders_changed)
         self.config_view.tags_changed.connect(self._on_folders_changed)
         self.config_view.checkpoints_changed.connect(self._on_checkpoints_changed)
+        self.config_view.worker_started.connect(self._show_config)
+        self.config_view.theme_change_requested.connect(self._switch_theme)
         self.dashboard = DashboardView(self.i18n, self.folder_store, self.tag_store, self.cfg)
         self.dashboard.refetch_requested.connect(self._on_refetch)
         self.dashboard.remove_requested.connect(self._on_remove)
@@ -104,6 +106,10 @@ class MainWindow(QMainWindow):
         self.dashboard.tags_changed.connect(self._on_folders_changed)
         self.compare = CompareView(self.i18n)
         self.folder_stat = FolderStatView(self.i18n, self.folder_store, self.store)
+        # The Folders / Tags management cards are built by ConfigView (all the
+        # folder/tag logic lives there) but shown at the top of this view.
+        self.folder_stat.mount_taxonomy_cards(self.config_view.folders_card,
+                                              self.config_view.tags_card)
         self.compare_charts = CompareChartsView(self.i18n)
         self.content_quality = ContentQualityView(self.i18n, self.folder_store, self.store, self.cfg)
         self.mutual_pr = MutualPrView(self.i18n, self.folder_store, self.store,
@@ -178,6 +184,8 @@ class MainWindow(QMainWindow):
     def _refresh_sidebar(self) -> None:
         self.side.set_channels(self.store.list())
         self.config_view.refresh_lean_list()
+        self.config_view.refresh_folders_list()   # folder/tag cards live on…
+        self.config_view.refresh_tags_list()      # …the Folders & Tags view now
         self.folder_stat.refresh()
         self.content_quality.refresh()
         self.mutual_pr.refresh()
@@ -339,6 +347,7 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(self, self.i18n.tr("app_title"),
                                 self.i18n.tr("worker_running"))
             self._build_menu()
+            self.config_view.sync_theme_combo()  # revert the picker
             return
         self.cfg.theme = pref
         self.cfg.save()

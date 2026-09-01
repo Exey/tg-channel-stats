@@ -1,10 +1,13 @@
-"""Folder Stat view: for one folder of channels, per-period
-(monthly/seasonal/half-year/rolling-year) totals and a composite Rating,
-exportable as Markdown.
+"""Folders & Tags view (nav_folder_stat): the Folders and Tags management
+cards up top — built by app.ui.config_view (which owns all the folder/tag
+logic plus the worker the "Refresh comments" action needs) and mounted here
+by MainWindow via mount_taxonomy_cards() — then, below them, per-period
+(monthly/seasonal/half-year/rolling-year) totals and a composite Rating for
+one folder, exportable as Markdown.
 
-The cross-channel **reposts** table that used to sit at the top of this view
-now lives at the bottom of app.ui.mutual_pr_view instead (all the ad-swap
-signals on one screen). Everything in the period table —
+The cross-channel **reposts** table that used to sit here now lives at the
+bottom of app.ui.mutual_pr_view instead (all the ad-swap signals on one
+screen). Everything in the period table —
 views/shares/reactions/viral-share and the "most viewed post" — comes from
 each checkpoint's `distributions.monthly`, which the fetcher fills from
 *every* scanned post (not a fresh Telegram fetch), so it's accurate
@@ -132,6 +135,13 @@ class FolderStatView(QWidget):
         header.addWidget(self.sub_lbl)
         page.addLayout(header)
 
+        # Folder / Tag management cards — built by ConfigView, mounted here
+        # by MainWindow via mount_taxonomy_cards().
+        self._taxonomy_lay = QVBoxLayout()
+        self._taxonomy_lay.setContentsMargins(0, 0, 0, 0)
+        self._taxonomy_lay.setSpacing(16)
+        page.addLayout(self._taxonomy_lay)
+
         pick_row = QHBoxLayout()
         self.pick_lbl = QLabel(self.tr_("folder_stat_pick_folder"))
         pick_row.addWidget(self.pick_lbl)
@@ -175,6 +185,15 @@ class FolderStatView(QWidget):
         body.addWidget(self._period_card(), 1)
 
         self.page_scroll.setWidget(page_holder)
+
+    def mount_taxonomy_cards(self, folders_card, tags_card) -> None:
+        """Place ConfigView's Folders and Tags cards at the top of this view
+        (they own their own logic; this view just hosts them)."""
+        row = QHBoxLayout()
+        row.setSpacing(18)
+        row.addWidget(folders_card, 1)
+        row.addWidget(tags_card, 1)
+        self._taxonomy_lay.addLayout(row)
 
     def _period_card(self) -> SectionCard:
         card = SectionCard(self.tr_("folder_stat_period_title"))

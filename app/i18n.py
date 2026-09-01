@@ -116,8 +116,9 @@ EN = {
     "tag_none": "No tag",
     "tag_choose": "Assign this channel to a tag",
     # folder stat view
-    "nav_folder_stat": "📁 Folder Stats",
-    "folder_stat_sub": "Periodic stats and a composite Rating for one folder",
+    "nav_folder_stat": "📁 Folders & Tags",
+    "folder_stat_sub": "Manage folders and tags, plus per-period stats and a "
+                       "composite Rating for one folder",
     "folder_stat_pick_folder": "Folder:",
     "folder_stat_no_folders": "No folders yet — create one from the Config screen.",
     "folder_stat_empty_channels": "This folder has no channels yet.",
@@ -554,8 +555,9 @@ RU = {
     "tag_none": "Без тега",
     "tag_choose": "Назначить этому каналу тег",
     # folder stat view
-    "nav_folder_stat": "📁 Статистика папки",
-    "folder_stat_sub": "Статистика по периодам и сводный рейтинг для одной папки",
+    "nav_folder_stat": "📁 Папки и теги",
+    "folder_stat_sub": "Управление папками и тегами, а также статистика по "
+                       "периодам и сводный рейтинг для одной папки",
     "folder_stat_pick_folder": "Папка:",
     "folder_stat_no_folders": "Пока нет папок — создайте на экране настроек.",
     "folder_stat_empty_channels": "В этой папке пока нет каналов.",
