@@ -22,6 +22,7 @@ change.
 from __future__ import annotations
 
 from datetime import datetime
+from statistics import median
 
 from PySide6.QtCore import Qt, QUrl
 from PySide6.QtGui import QDesktopServices
@@ -36,7 +37,7 @@ from ..folders import FolderStore
 from ..periods import (
     YEAR_WINDOW_OPTIONS, period_key_label as _period_key_label, year_window_cutoff,
 )
-from ..rating import score_entries
+from ..rating import VIRAL_SHARE_DISPLAY_CAP, score_entries
 from ..scoring import post_gauge_value, post_score_raw
 from ..store import ChannelStore
 from .dashboard_view import build_post_link, fmt_int
@@ -65,7 +66,13 @@ def _channel_title(ch: dict) -> str:
 
 
 def _channel_avg_views(ch: dict) -> float:
-    return float(ch.get("stats", {}).get("avg_views", 0) or 0)
+    """The reference the per-post quality gauge compares a post's views
+    against (app.scoring's viral-excess term) — the channel's *recent*
+    average where the checkpoint carries one, so a channel that has simply
+    grown doesn't score every recent post as a breakout; the lifetime
+    average otherwise (older checkpoints, or too little recent history)."""
+    stats = ch.get("stats", {})
+    return float(stats.get("avg_views_recent") or stats.get("avg_views", 0) or 0)
 
 
 def _last_ended_half_year_key() -> tuple:
@@ -329,9 +336,32 @@ class FolderStatView(QWidget):
         fills from *every* scanned post, not just the stored top-N sample
         in `rows` (checkpoints fetched before these fields existed report
         zero/blank here until refetched). Post Quality is the exception —
-        app.scoring's gauge score needs per-post reactions/forwards/
-        comments/views, which only `rows` carries, so it's averaged over
-        whatever of that top-N pool falls in each bucket instead.
+        app.scoring's gauge score needs per-post reactions/forwards/comments/
+        views, which only `rows` carries, so it's computed over whatever of
+        that top-N pool falls in each bucket instead. The *displayed*
+        "Post Quality" column (`quality_display`) is the standard 0-1000
+        gauge — same number the dashboard and High-Quality Posts grid show
+        — averaged over the pool. The Rating consumes a *separate* take
+        (`quality`): median not mean (the pool skews toward a channel's best
+        posts) and `viral_excess=False` (the Rating already scores reach via
+        its views + virality terms). Keeping the two apart means tuning the
+        Rating never turns the readable column into single digits.
+
+        Each entry also carries `posts` (the period's post count) — the
+        Rating divides views and engagement by it, so a channel that posts
+        3× as often doesn't out-rank one with better posts (see app.rating).
+
+        Reposts (posts forwarded in from another channel — see
+        app.tools.channel_stat._is_repost) are excluded throughout: the
+        monthly `*_own` totals drop them, and the quality loop skips
+        `rows` entries flagged `repost`. A channel re-sharing a bigger
+        channel's viral post shouldn't inherit its views into this view's
+        totals or its Rating. Each entry also carries `repost_share` (the
+        percent of the period's posts that were reposts), which
+        app.rating.score_entries turns into an extra smooth cut on the
+        composite score once it passes 20%. Checkpoints fetched before the
+        `repost` flag existed have no `*_own` totals, report repost_share 0,
+        and fall back to counting every post, unchanged, until refetched.
         """
         periods: dict[tuple, dict] = {}
         for ch in self._channels:
@@ -341,6 +371,9 @@ class FolderStatView(QWidget):
                 count = int(m.get("count", 0) or 0)
                 if not count:
                     continue
+                # Own posts only (reposts excluded); pre-`repost` checkpoints
+                # have no `*_own` keys, so fall back to the all-posts totals.
+                own_count = int(m.get("count_own", count) or 0)
                 try:
                     year, month = (int(x) for x in m.get("label", "").split("-"))
                 except ValueError:
@@ -356,21 +389,36 @@ class FolderStatView(QWidget):
                 else:
                     key, label = _period_key_label(year, month, mode)
                 b = buckets.setdefault(key, {
-                    "label": label, "count": 0, "views": 0, "shares": 0,
-                    "reactions": 0, "viral_count": 0, "top_row": None,
+                    "label": label, "count": 0, "count_total": 0, "views": 0,
+                    "shares": 0, "reactions": 0, "viral_count": 0, "top_row": None,
                 })
-                b["count"] += count
-                b["views"] += int(m.get("views", 0) or 0)
-                b["shares"] += int(m.get("shares", 0) or 0)
-                b["reactions"] += int(m.get("reactions", 0) or 0)
-                b["viral_count"] += int(m.get("viral_count", 0) or 0)
+                b["count"] += own_count
+                b["count_total"] += count
+                b["views"] += int(m.get("views_own", m.get("views", 0)) or 0)
+                b["shares"] += int(m.get("shares_own", m.get("shares", 0)) or 0)
+                b["reactions"] += int(m.get("reactions_own", m.get("reactions", 0)) or 0)
+                b["viral_count"] += int(m.get("viral_count_own", m.get("viral_count", 0)) or 0)
                 top = m.get("top")
                 if top and (b["top_row"] is None
                            or int(top.get("views", 0) or 0) > int(b["top_row"].get("views", 0) or 0)):
                     b["top_row"] = top
 
-            quality_scores: dict[tuple, list[float]] = {}
+            # Two takes on the same 0-1000 gauge (app.scoring):
+            #  q_rating  — viral_excess=False, median: fed to app.rating, which
+            #              already scores reach (views term) + virality on
+            #              their own, and whose `rows` pool skews to a
+            #              channel's best posts (so median, not mean).
+            #  q_display — the standard per-post gauge (viral_excess on, mean),
+            #              the same number the dashboard / High-Quality Posts
+            #              grid show; this is the readable "Post Quality"
+            #              column, kept separate so tuning the Rating never
+            #              makes the displayed figure unrecognisable.
+            q_rating: dict[tuple, list[float]] = {}
+            q_display: dict[tuple, list[float]] = {}
             for r in ch.get("rows", []) or []:
+                # Reposts aren't this channel's content — see module note.
+                if r.get("repost"):
+                    continue
                 dt = _parse_date(r.get("date", ""))
                 if dt is None:
                     continue
@@ -381,17 +429,29 @@ class FolderStatView(QWidget):
                     key = ("year", self._year_window_key)
                 else:
                     key, _label = _period_key_label(dt.year, dt.month, mode)
-                quality_scores.setdefault(key, []).append(
+                q_rating.setdefault(key, []).append(
+                    post_gauge_value(post_score_raw(r, avg_views, viral_excess=False)))
+                q_display.setdefault(key, []).append(
                     post_gauge_value(post_score_raw(r, avg_views)))
 
             for key, b in buckets.items():
                 bucket = periods.setdefault(key, {"label": b["label"], "entries": []})
-                scores = quality_scores.get(key)
+                rscores = q_rating.get(key)
+                dscores = q_display.get(key)
                 bucket["entries"].append({
                     "channel": ch, "views": b["views"], "shares": b["shares"],
                     "reactions": b["reactions"], "top_row": b["top_row"],
-                    "viral_share": b["viral_count"] / b["count"] * 100,
-                    "quality": (sum(scores) / len(scores)) if scores else 0,
+                    # posts in the period — app.rating divides views/engagement
+                    # by this so a prolific channel can't win on volume alone.
+                    "posts": b["count"],
+                    "viral_share": min((b["viral_count"] / b["count"] * 100) if b["count"] else 0,
+                                       VIRAL_SHARE_DISPLAY_CAP),
+                    # % of the period's posts that were reposts — feeds
+                    # app.rating.repost_share_penalty.
+                    "repost_share": ((b["count_total"] - b["count"]) / b["count_total"] * 100)
+                                    if b["count_total"] else 0,
+                    "quality": median(rscores) if rscores else 0,
+                    "quality_display": (sum(dscores) / len(dscores)) if dscores else 0,
                 })
         for bucket in periods.values():
             score_entries(bucket["entries"])
@@ -612,7 +672,7 @@ class FolderStatView(QWidget):
         if col == 7:
             return entry["score"]
         if col == 8:
-            return entry["quality"]
+            return entry["quality_display"]
         return 0
 
     def _on_period_header_clicked(self, col: int) -> None:
@@ -658,7 +718,7 @@ class FolderStatView(QWidget):
 
             self.period_table.setItem(i, 6, QTableWidgetItem(f"{entry['viral_share']:.4f}%"))
             self.period_table.setItem(i, 7, QTableWidgetItem(f"{entry['score']:.3f}"))
-            self.period_table.setItem(i, 8, QTableWidgetItem(str(round(entry["quality"]))))
+            self.period_table.setItem(i, 8, QTableWidgetItem(str(round(entry["quality_display"]))))
 
         order = (Qt.SortOrder.DescendingOrder if self._period_sort_desc
                  else Qt.SortOrder.AscendingOrder)
@@ -713,7 +773,7 @@ class FolderStatView(QWidget):
                 lines.append(
                     f"| {_channel_uid(ch)} | {entry['views']} | {entry['shares']} | "
                     f"{entry['reactions']} | {post_md} | {entry['viral_share']:.4f}% | "
-                    f"{entry['score']:.3f} | {round(entry['quality'])} |")
+                    f"{entry['score']:.3f} | {round(entry['quality_display'])} |")
             lines.append("")
         return "\n".join(lines).rstrip("\n") + "\n"
 

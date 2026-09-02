@@ -6,7 +6,10 @@ the chosen period it does two jobs at once:
 * engagement ranking (from tg-super-admin's channel_top) — per-post views,
   reactions and forwards ("private reposts"), album-merged, keeping the union
   of the top-N by each metric so the on-screen table can re-sort and still
-  show the true leaders. Public reposts are fetched only for that pool.
+  show the true leaders. Public reposts are fetched only for that pool. Each
+  post is also flagged as a `repost` when it was forwarded in from another
+  channel (see _is_repost) — content-quality scoring and the Rating drop
+  those so a channel can't pad its score with someone else's viral post.
 
 * activity analytics (ported from telegram-channel-analyzer) — member count,
   creation date, posts/day, posts-with-media share, average/max views, and
@@ -24,6 +27,23 @@ from datetime import datetime, timedelta, timezone
 from .common import resolve_entity
 
 HEARTBEAT_EVERY = 500
+
+# A post counts as "viral" when its views beat VIRAL_MULTIPLE × the average
+# views per post over the VIRAL_BASELINE_MONTHS calendar months *before* its
+# own — a trailing baseline, not the channel's lifetime average. Testing
+# against the lifetime figure flags nearly every post of a channel that has
+# merely grown as "viral" (one export read 90%); testing against the post's
+# own month erases the growth entirely. A trailing window sits in between:
+# a genuine growth spurt shows up as elevated virality for a quarter or so
+# and then settles as the new level becomes the norm. When there isn't
+# enough prior history (fewer than VIRAL_BASELINE_MIN_POSTS in the window)
+# it falls back to the lifetime average passed in. And however fast a
+# channel grows, at most VIRAL_MONTHLY_CAP_FRAC of any one month's posts can
+# be "viral" — past that it's a level shift, not a month of outliers.
+VIRAL_MULTIPLE = 2.0
+VIRAL_BASELINE_MONTHS = 3
+VIRAL_BASELINE_MIN_POSTS = 6
+VIRAL_MONTHLY_CAP_FRAC = 0.5
 
 # Period-of-analysis choices offered in the GUI, in calendar days. "all"
 # (and any unrecognized/empty key) is intentionally absent — period_cutoff()
@@ -88,6 +108,30 @@ def _has_buttons(msg) -> bool:
     quality scoring, since clicks it's fishing for aren't the same signal
     as organic engagement."""
     return getattr(msg, "reply_markup", None) is not None
+
+
+def _is_repost(msg, own_channel_id: int) -> bool:
+    """Whether this post was forwarded into the channel from *another*
+    source — the channel re-publishing someone else's post (Telethon's
+    `Message.fwd_from`). A channel re-forwarding its *own* earlier post is
+    not a repost; a forward whose origin Telegram strips (`fwd_from` set but
+    `from_id` gone) still is — the content isn't original to this channel
+    either way.
+
+    app.scoring scores a repost 0 (its views/reactions belong to the
+    original author, not this channel), and the Folder Stats view drops
+    reposts from the per-period view/share/reaction/viral totals that feed
+    the composite Rating — so a channel can't inflate its quality or rating
+    by reposting viral content from a bigger channel. Channel-level stat
+    cards (avg views, ERR%, viral share, Mutual PR) still count reposts.
+    """
+    fwd = getattr(msg, "fwd_from", None)
+    if fwd is None:
+        return False
+    origin = getattr(getattr(fwd, "from_id", None), "channel_id", None)
+    if origin is not None and own_channel_id and int(origin) == int(own_channel_id):
+        return False
+    return True
 
 
 def _preview(text: str, limit: int = 140) -> str:
@@ -206,6 +250,54 @@ async def _channel_info(client, entity) -> dict:
     return info
 
 
+def _month_index(label: str) -> int:
+    """'YYYY-MM' -> a monotonic month number, for trailing-window math."""
+    year, month = (int(x) for x in label.split("-"))
+    return year * 12 + (month - 1)
+
+
+def _viral_baseline(month_posts: list[dict], fallback_avg: float) -> dict[str, float]:
+    """label -> the views-per-post average to test that month's posts against
+    for "viral" (see VIRAL_MULTIPLE): the mean over the VIRAL_BASELINE_MONTHS
+    calendar months immediately before it, or `fallback_avg` (the channel's
+    lifetime average) when that window holds fewer than
+    VIRAL_BASELINE_MIN_POSTS."""
+    by_month: dict[str, list[float]] = {}
+    for p in month_posts:
+        s = by_month.setdefault(p["label"], [0.0, 0])
+        s[0] += p["views"]
+        s[1] += 1
+    idx = {lbl: _month_index(lbl) for lbl in by_month}
+    out: dict[str, float] = {}
+    for label in by_month:
+        window = range(idx[label] - VIRAL_BASELINE_MONTHS, idx[label])
+        total = sum(by_month[l][0] for l, i in idx.items() if i in window)
+        count = sum(by_month[l][1] for l, i in idx.items() if i in window)
+        out[label] = total / count if count >= VIRAL_BASELINE_MIN_POSTS and total else fallback_avg
+    return out
+
+
+def _recent_avg_views(month_posts: list[dict], fallback_avg: float) -> float:
+    """Mean views per post over the most recent VIRAL_BASELINE_MONTHS calendar
+    months that have posts — the "what's normal for this channel *now*"
+    figure. Used as the reference for the per-post quality gauge's
+    viral-excess term (app.scoring) so a channel that has simply grown
+    doesn't read every recent post as a breakout. Falls back to the lifetime
+    average when there isn't enough recent history."""
+    by_month: dict[str, list[float]] = {}
+    for p in month_posts:
+        s = by_month.setdefault(p["label"], [0.0, 0])
+        s[0] += p["views"]
+        s[1] += 1
+    if not by_month:
+        return fallback_avg
+    newest = max(_month_index(lbl) for lbl in by_month)
+    window = range(newest - VIRAL_BASELINE_MONTHS + 1, newest + 1)
+    total = sum(by_month[l][0] for l in by_month if _month_index(l) in window)
+    count = sum(by_month[l][1] for l in by_month if _month_index(l) in window)
+    return total / count if count >= VIRAL_BASELINE_MIN_POSTS and total else fallback_avg
+
+
 def _monthly_aggregates(month_posts: list[dict], avg_views: float) -> dict[str, dict]:
     """Per-month sums over *every* scanned post (not just the top-N pool), so
     folder/period views reflect real totals instead of a sampled subset.
@@ -216,14 +308,39 @@ def _monthly_aggregates(month_posts: list[dict], avg_views: float) -> dict[str, 
     the mutated `rows` would make these sums inconsistent with `stats`
     (avg_views etc.), which are accumulated from the same snapshots.
     """
+    baseline = _viral_baseline(month_posts, avg_views)
     agg: dict[str, dict] = {}
     for p in month_posts:
-        a = agg.setdefault(p["label"], {"views": 0, "shares": 0, "reactions": 0, "viral_count": 0})
+        a = agg.setdefault(p["label"], {
+            "views": 0, "shares": 0, "reactions": 0, "viral_count": 0, "count": 0,
+            # ..._own = same sums over the channel's *own* posts only
+            # (reposts forwarded in from other channels excluded) — the
+            # Folder Stats Rating reads these so reposted viral content
+            # can't pad a channel's score. See _is_repost.
+            "views_own": 0, "shares_own": 0, "reactions_own": 0,
+            "viral_count_own": 0, "count_own": 0,
+        })
         a["views"] += p["views"]
         a["shares"] += p["shares"]
         a["reactions"] += p["reactions"]
-        if avg_views and p["views"] > 2 * avg_views:
+        a["count"] += 1
+        base = baseline.get(p["label"], avg_views)
+        is_viral = bool(base and p["views"] > VIRAL_MULTIPLE * base)
+        if is_viral:
             a["viral_count"] += 1
+        if not p.get("repost"):
+            a["views_own"] += p["views"]
+            a["shares_own"] += p["shares"]
+            a["reactions_own"] += p["reactions"]
+            a["count_own"] += 1
+            if is_viral:
+                a["viral_count_own"] += 1
+    # However fast the channel grew, at most VIRAL_MONTHLY_CAP_FRAC of a
+    # month's posts can be "viral" — beyond that it's a level shift.
+    for a in agg.values():
+        a["viral_count"] = min(a["viral_count"], int(a["count"] * VIRAL_MONTHLY_CAP_FRAC))
+        a["viral_count_own"] = min(a["viral_count_own"],
+                                   int(a["count_own"] * VIRAL_MONTHLY_CAP_FRAC))
     return agg
 
 
@@ -232,9 +349,13 @@ def _monthly_top_posts(rows: list[dict]) -> dict[str, dict]:
     *every* scanned post (final, post-album-merge state), not just the
     top-N pool, so a period's "most viewed post" is always the real one
     instead of only showing up when it happens to also be a global top-N
-    pick."""
+    pick. Reposts (content forwarded in from another channel — see
+    _is_repost) are skipped so a period's showcased post is the channel's
+    own, matching the repost-excluded Rating totals."""
     top: dict[str, dict] = {}
     for r in rows:
+        if r.get("repost"):
+            continue
         label = (r.get("date") or "")[:7]
         if len(label) != 7:
             continue
@@ -266,6 +387,13 @@ def _monthly_series(month_counts: dict[str, int], month_agg: dict[str, dict],
             "shares": int(a.get("shares", 0)),
             "reactions": int(a.get("reactions", 0)),
             "viral_count": int(a.get("viral_count", 0)),
+            # Own-posts-only totals (reposts excluded) — Folder Stats
+            # Rating reads these; see _monthly_aggregates / _is_repost.
+            "count_own": int(a.get("count_own", 0)),
+            "views_own": int(a.get("views_own", 0)),
+            "shares_own": int(a.get("shares_own", 0)),
+            "reactions_own": int(a.get("reactions_own", 0)),
+            "viral_count_own": int(a.get("viral_count_own", 0)),
             "top": month_top.get(label),
         })
         m += 1
@@ -311,7 +439,6 @@ async def run_channel_stat(client, p: dict, ctx) -> str:
     views_settled_n = 0
     sum_views_last_year = 0
     sum_forwards_last_year = 0
-    views_seen: list[int] = []  # per-post views, for the viral-share pass below
     forwards_seen: list[int] = []  # per-post reposts, for the trimmed-mean pass below
     with_media = with_photo = with_document = 0
     hour_dist = [0] * 24
@@ -337,7 +464,6 @@ async def run_channel_stat(client, p: dict, ctx) -> str:
         nonlocal with_media, with_photo, with_document, first_ts, last_ts
         posts += 1
         v = row["views"]
-        views_seen.append(v)
         if v > 0:
             sum_views += v
             views_n += 1
@@ -365,7 +491,8 @@ async def run_channel_stat(client, p: dict, ctx) -> str:
             label = f"{d.year:04d}-{d.month:02d}"
             month_counts[label] = month_counts.get(label, 0) + 1
             month_posts.append({"label": label, "views": v,
-                                "shares": row["forwards"], "reactions": row["reactions"]})
+                                "shares": row["forwards"], "reactions": row["reactions"],
+                                "repost": row.get("repost", False)})
             ts = int(d.timestamp())
             first_ts = ts if first_ts is None else min(first_ts, ts)
             last_ts = ts if last_ts is None else max(last_ts, ts)
@@ -388,6 +515,7 @@ async def run_channel_stat(client, p: dict, ctx) -> str:
         comments = _comment_total(msg)
         media_type = _media_type(msg)
         has_buttons = _has_buttons(msg)
+        is_repost = _is_repost(msg, info["id"])
 
         if gid is not None and gid == current_gid:
             # Same album — merge into the row being built (see channel_top).
@@ -401,6 +529,7 @@ async def run_channel_stat(client, p: dict, ctx) -> str:
             # keyboard on *any* member of the album is enough to treat the
             # whole merged post as button-driven.
             current["has_buttons"] = current["has_buttons"] or has_buttons
+            current["repost"] = current["repost"] or is_repost
             if media_type:
                 current["media_counts"][media_type] = (
                     current["media_counts"].get(media_type, 0) + 1)
@@ -434,6 +563,8 @@ async def run_channel_stat(client, p: dict, ctx) -> str:
                 # See _has_buttons — OR'd across the whole album in the
                 # merge branch above, not anchor-only.
                 "has_buttons": has_buttons,
+                # See _is_repost — likewise OR'd across the album.
+                "repost": is_repost,
                 "public": None,
             }
             current_gid = gid
@@ -457,10 +588,16 @@ async def run_channel_stat(client, p: dict, ctx) -> str:
     else:
         total_days, first_iso, last_iso = 0, "", ""
     avg_views_raw = sum_views / views_n if views_n else 0
-    viral_count = sum(1 for v in views_seen if v > 2 * avg_views_raw) if avg_views_raw else 0
+    month_agg = _monthly_aggregates(month_posts, avg_views_raw)
+    # Whole-channel viral share = the sum of the per-month viral counts (each
+    # judged against that month's own average, not the lifetime one — see
+    # _viral_baseline), so it matches what the Folder Stats / export show for
+    # a period rather than reading high just because the channel has grown.
+    viral_count = sum(a["viral_count"] for a in month_agg.values())
     stats = {
         "total_posts": posts,
         "avg_views": round(sum_views / views_n, 1) if views_n else 0,
+        "avg_views_recent": round(_recent_avg_views(month_posts, avg_views_raw), 1),
         "viral_post_share": round(viral_count / posts * 100, 1) if posts else 0,
         "max_views": max_views,
         "avg_reactions": round(sum_reactions / posts, 1) if posts else 0,
@@ -484,7 +621,6 @@ async def run_channel_stat(client, p: dict, ctx) -> str:
         "first_post_date": first_iso,
         "last_post_date": last_iso,
     }
-    month_agg = _monthly_aggregates(month_posts, avg_views_raw)
     month_top = _monthly_top_posts(rows)
     distributions = {
         "hour": hour_dist,

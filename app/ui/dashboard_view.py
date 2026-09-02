@@ -351,6 +351,15 @@ class DashboardView(QWidget):
         self.recent_posts_card.body.addWidget(scroll)
         self.body.addWidget(self.recent_posts_card)
 
+    def _quality_ref_views(self) -> float:
+        """Reference average a post's views are measured against for the
+        quality gauge's viral-excess term (app.scoring) — the channel's
+        *recent* average where the checkpoint has one, so a channel that has
+        merely grown doesn't score every recent post as a breakout; lifetime
+        otherwise. The stat cards / Top Viral rate keep the lifetime figure."""
+        stats = self._data.get("stats", {})
+        return float(stats.get("avg_views_recent") or stats.get("avg_views", 0) or 0)
+
     def _rebuild_recent_posts(self) -> None:
         for i in reversed(range(self.recent_posts_lay.count())):
             item = self.recent_posts_lay.takeAt(i)
@@ -359,7 +368,7 @@ class DashboardView(QWidget):
                 w.hide()
                 w.deleteLater()
 
-        avg_views = self._data.get("stats", {}).get("avg_views", 0) or 0
+        avg_views = self._quality_ref_views()
         rows = sorted(self._rows, key=lambda r: r.get("ts", 0), reverse=True)[:RECENT_POSTS_COUNT]
 
         for row in rows:
@@ -875,10 +884,15 @@ class DashboardView(QWidget):
         self._rows — the stored top-N pool (see channel_stat.py's module
         docstring), not the channel's full history, so — like the Top Viral
         table below — this reflects the pool's posts, not literally every
-        post ever published."""
-        avg_views = self._data.get("stats", {}).get("avg_views", 0) or 0
+        post ever published. Reposts (content forwarded in from another
+        channel) are skipped — their engagement isn't this channel's."""
+        avg_views = self._quality_ref_views()
         buckets: dict[tuple, list[float]] = {}
         for r in self._rows:
+            # Forwarded in from another channel — not this channel's
+            # content (see app.tools.channel_stat._is_repost).
+            if r.get("repost"):
+                continue
             try:
                 dt = datetime.fromisoformat((r.get("date") or "").replace("Z", "+00:00"))
             except ValueError:

@@ -34,8 +34,10 @@ from datetime import datetime, timedelta, timezone
 
 from ..store import ChannelStore
 from .channel_stat import (
-    _channel_info, _comment_total, _has_buttons, _media_type, _one_per_month_ids,
-    _preview, _public_forwards, _reaction_total, _top_ids, run_channel_stat,
+    VIRAL_BASELINE_MIN_POSTS, VIRAL_BASELINE_MONTHS, VIRAL_MONTHLY_CAP_FRAC,
+    VIRAL_MULTIPLE, _channel_info, _comment_total, _has_buttons, _is_repost,
+    _media_type, _month_index, _one_per_month_ids, _preview, _public_forwards,
+    _reaction_total, _top_ids, run_channel_stat,
 )
 from .common import resolve_entity
 
@@ -67,7 +69,9 @@ def _fill_month_gaps(by_label: dict[str, dict]) -> list[dict]:
         label = f"{y:04d}-{m:02d}"
         out.append(by_label.get(label, {
             "label": label, "count": 0, "views": 0, "shares": 0,
-            "reactions": 0, "viral_count": 0, "top": None,
+            "reactions": 0, "viral_count": 0,
+            "count_own": 0, "views_own": 0, "shares_own": 0,
+            "reactions_own": 0, "viral_count_own": 0, "top": None,
         }))
         m += 1
         if m > 12:
@@ -82,6 +86,7 @@ async def _scan_since(client, entity, cutoff: datetime, ctx) -> list[dict]:
     current: dict | None = None
     current_gid = None
     scanned = 0
+    own_id = int(getattr(entity, "id", 0) or 0)
     async for msg in client.iter_messages(entity):
         if ctx.cancelled():
             break
@@ -99,6 +104,7 @@ async def _scan_since(client, entity, cutoff: datetime, ctx) -> list[dict]:
         comments = _comment_total(msg)
         media_type = _media_type(msg)
         has_buttons = _has_buttons(msg)
+        is_repost = _is_repost(msg, own_id)
 
         if gid is not None and gid == current_gid and current is not None:
             current["ids"].append(msg.id)
@@ -108,6 +114,7 @@ async def _scan_since(client, entity, cutoff: datetime, ctx) -> list[dict]:
             current["forwards"] = max(current["forwards"], forwards)
             current["comments"] = max(current["comments"], comments)
             current["has_buttons"] = current["has_buttons"] or has_buttons
+            current["repost"] = current["repost"] or is_repost
             if media_type:
                 current["media_counts"][media_type] = (
                     current["media_counts"].get(media_type, 0) + 1)
@@ -123,7 +130,7 @@ async def _scan_since(client, entity, cutoff: datetime, ctx) -> list[dict]:
                 "views": views, "reactions": reactions, "forwards": forwards,
                 "comments": comments, "media_type": media_type,
                 "media_counts": {media_type: 1} if media_type else {},
-                "has_buttons": has_buttons, "public": None,
+                "has_buttons": has_buttons, "repost": is_repost, "public": None,
             }
             current_gid = gid
             rows.append(current)
@@ -177,17 +184,53 @@ def _merge(data: dict, fresh: list[dict], cutoff: datetime) -> set[int]:
         total_count += len(posts)
     avg_views = total_views / total_count if total_count else 0
 
+    # Per-month (views_total, count) across kept + fresh months, for the
+    # trailing "viral" baseline — see channel_stat._viral_baseline.
+    month_totals: dict[str, tuple[float, int]] = {
+        lbl: (float(m.get("views", 0) or 0), int(m.get("count", 0) or 0))
+        for lbl, m in kept.items()
+    }
+    for lbl, posts in fresh_by_month.items():
+        month_totals[lbl] = (sum(p["views"] for p in posts), len(posts))
+
+    def _viral_base(label: str) -> float:
+        i0 = _month_index(label)
+        window = {i0 - k for k in range(1, VIRAL_BASELINE_MONTHS + 1)}
+        tv = tc = 0.0
+        for lbl, (v, c) in month_totals.items():
+            if _month_index(lbl) in window:
+                tv += v
+                tc += c
+        return tv / tc if tc >= VIRAL_BASELINE_MIN_POSTS and tv else avg_views
+
     rebuilt = dict(kept)
     for label, posts in fresh_by_month.items():
+        # ..._own = same sums over the channel's own posts only (reposts
+        # forwarded in from other channels excluded) — the Folder Stats
+        # Rating reads these. Matches channel_stat._monthly_aggregates.
+        own = [p for p in posts if not p.get("repost")]
+        base = _viral_base(label)
+
+        def _is_viral(p: dict, base: float = base) -> bool:
+            return bool(base and p["views"] > VIRAL_MULTIPLE * base)
+
+        vc = min(sum(1 for p in posts if _is_viral(p)),
+                 int(len(posts) * VIRAL_MONTHLY_CAP_FRAC))
+        vc_own = min(sum(1 for p in own if _is_viral(p)),
+                     int(len(own) * VIRAL_MONTHLY_CAP_FRAC))
         rebuilt[label] = {
             "label": label,
             "count": len(posts),
             "views": sum(p["views"] for p in posts),
             "shares": sum(p["forwards"] for p in posts),
             "reactions": sum(p["reactions"] for p in posts),
-            "viral_count": sum(1 for p in posts
-                               if avg_views and p["views"] > 2 * avg_views),
-            "top": max(posts, key=lambda p: p["views"]),
+            "viral_count": vc,
+            "count_own": len(own),
+            "views_own": sum(p["views"] for p in own),
+            "shares_own": sum(p["forwards"] for p in own),
+            "reactions_own": sum(p["reactions"] for p in own),
+            "viral_count_own": vc_own,
+            "top": max(own, key=lambda p: p["views"], default=None),
         }
     dist["monthly"] = _fill_month_gaps(rebuilt)
 
@@ -204,6 +247,16 @@ def _merge(data: dict, fresh: list[dict], cutoff: datetime) -> set[int]:
         stats["avg_reactions"] = round(tot_react / tot_count, 1)
         stats["avg_reposts"] = round(tot_shares / tot_count, 1)
         stats["viral_post_share"] = round(tot_viral / tot_count * 100, 1)
+        # Recent average = last VIRAL_BASELINE_MONTHS months with posts (see
+        # channel_stat._recent_avg_views) — the quality gauge's viral-excess
+        # reference, so a grown channel doesn't score every recent post high.
+        active = [m for m in monthly if int(m.get("count", 0) or 0)]
+        recent = active[-VIRAL_BASELINE_MONTHS:]
+        rc = sum(int(m.get("count", 0) or 0) for m in recent)
+        rv = sum(int(m.get("views", 0) or 0) for m in recent)
+        stats["avg_views_recent"] = (round(rv / rc, 1)
+                                     if rc >= VIRAL_BASELINE_MIN_POSTS and rv
+                                     else stats["avg_views"])
     stats["max_views"] = max(int(stats.get("max_views", 0) or 0),
                              max((p["views"] for p in fresh), default=0))
     stats["max_reposts"] = max(int(stats.get("max_reposts", 0) or 0),
@@ -229,13 +282,19 @@ def _merge(data: dict, fresh: list[dict], cutoff: datetime) -> set[int]:
     return fresh_ids
 
 
-async def _full_refresh(client, data: dict, ctx) -> str:
-    """Fallback for a checkpoint too old to merge incrementally (no
-    `distributions.monthly`): one full channel_stat scan over its stored
-    period, so future lean refreshes have monthly history to build on."""
+async def _full_refresh(client, data: dict, ctx, period: str | None = None) -> str:
+    """One full channel_stat scan that replaces the checkpoint outright.
+
+    Used two ways: as the automatic fallback for a checkpoint too old to
+    merge incrementally (no `distributions.monthly`, `period` left None so
+    the stored period is kept), and for an explicit "re-fetch N years"
+    request (`period` given, e.g. "2y") — a lean merge only rebuilds the
+    recent months, so it can't retro-fit newly added per-post fields
+    (reposts, buttons, comments…) onto a channel's older history; a full
+    scan can."""
     params = {
         "channel": data.get("channel") or data.get("username") or data.get("key"),
-        "period": data.get("period") or "",
+        "period": (data.get("period") or "") if period is None else period,
         "top_n": int(data.get("top_n") or 20),
         "fetch_public": bool(data.get("fetch_public")),
     }
@@ -245,7 +304,7 @@ async def _full_refresh(client, data: dict, ctx) -> str:
     payload["key"] = data.get("key")
     data.clear()
     data.update(payload)
-    return "full re-fetch (no monthly history to merge)"
+    return f"full re-fetch ({period})" if period else "full re-fetch (no monthly history to merge)"
 
 
 async def _refresh_one(client, data: dict, ctx) -> str:
@@ -295,11 +354,16 @@ async def _refresh_one(client, data: dict, ctx) -> str:
 
 
 async def run_lean_refresh(client, p: dict, ctx) -> str:
-    """p: {"keys": [checkpoint key, ...]}."""
+    """p: {"keys": [checkpoint key, ...], "full_period": "2y" | None}.
+
+    With `full_period` set, every key is fully re-scanned over that period
+    (see _full_refresh) instead of the usual incremental merge — for
+    rebuilding older history against current per-post fields."""
     keys = p.get("keys") or []
+    full_period = p.get("full_period") or None
     store = ChannelStore()
     total = len(keys)
-    ctx.log(f"Lean refresh: {total} channel(s)…")
+    ctx.log(f"{'Full re-fetch' if full_period else 'Lean refresh'}: {total} channel(s)…")
 
     updated = 0
     for i, key in enumerate(keys, 1):
@@ -312,7 +376,8 @@ async def run_lean_refresh(client, p: dict, ctx) -> str:
         title = data.get("title") or key
         ctx.log(f"[{i}/{total}] {title}…")
         try:
-            result = await _refresh_one(client, data, ctx)
+            result = (await _full_refresh(client, data, ctx, full_period)
+                      if full_period else await _refresh_one(client, data, ctx))
         except Exception as exc:  # noqa: BLE001 - surfaced to the GUI log
             ctx.log(f"  {title}: {exc}")
             ctx.progress(i, total)
@@ -325,5 +390,6 @@ async def run_lean_refresh(client, p: dict, ctx) -> str:
         ctx.log(f"  {title}: {result}.")
         ctx.progress(i, total)
 
-    ctx.log(f"Lean refresh: updated {updated}/{total} channel(s).")
+    ctx.log(f"{'Full re-fetch' if full_period else 'Lean refresh'}: "
+            f"updated {updated}/{total} channel(s).")
     return "ok"

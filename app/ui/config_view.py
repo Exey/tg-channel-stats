@@ -10,6 +10,7 @@ import html
 import json
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from statistics import median
 
 from PySide6.QtCore import Qt, QUrl, Signal
 from PySide6.QtGui import QDesktopServices
@@ -24,7 +25,7 @@ from ..config import CONN_FIELDS, config_dir
 from ..errors import friendly_os_error
 from ..folders import FolderStore
 from ..periods import period_key_label
-from ..rating import score_entries
+from ..rating import VIRAL_SHARE_DISPLAY_CAP, score_entries
 from ..scoring import post_gauge_value, post_score_raw
 from ..store import ChannelStore
 from ..tags import TagStore
@@ -110,7 +111,8 @@ class ConfigView(QWidget):
         # Every button that must be greyed out while a background worker runs
         # (the fetch/comments/lean jobs all share self.worker).
         self._busy_btns = [self.fetch_btn, self.refresh_comments_btn,
-                           self.lean_oldest_btn, self.lean_1mo_btn, self.lean_3mo_btn]
+                           self.lean_oldest_btn, self.lean_1mo_btn, self.lean_3mo_btn,
+                           self.lean_selected_btn, self.lean_selected_2y_btn]
 
     def _connection_card(self) -> Card:
         card = SectionCard("Telegram")
@@ -310,22 +312,6 @@ class ConfigView(QWidget):
         export_row.addWidget(self.folders_export_period_combo)
         card.body.addLayout(export_row)
 
-        # Lightweight partial re-fetch: only patches the `comments` field on
-        # each channel's already-stored checkpoint rows (see
-        # tools.comments_refresh) instead of a full re-scan — for a folder
-        # whose channels were fetched before that field existed, or whose
-        # comment counts have just gone stale.
-        comments_row = QHBoxLayout()
-        self.comments_refresh_lbl = QLabel(self.tr_("folder_comments_refresh_label"))
-        comments_row.addWidget(self.comments_refresh_lbl)
-        self.comments_folder_combo = QComboBox()
-        comments_row.addWidget(self.comments_folder_combo, 1)
-        self.refresh_comments_btn = QPushButton(self.tr_("folder_comments_refresh_btn"))
-        self.refresh_comments_btn.setToolTip(self.tr_("folder_comments_refresh_hint"))
-        self.refresh_comments_btn.clicked.connect(self._on_refresh_comments_clicked)
-        comments_row.addWidget(self.refresh_comments_btn)
-        card.body.addLayout(comments_row)
-
         # Bulk move: every tracked channel into one folder at once, instead
         # of assigning them one by one from the sidebar's right-click menu —
         # handy right after creating a folder for a batch of channels
@@ -379,16 +365,41 @@ class ConfigView(QWidget):
 
     # ------------------------------------------------------- lean refresh
     def _lean_refresh_card(self) -> Card:
-        """Staleness list of every tracked channel (oldest fetch first) plus
-        one-click batch re-fetch of the stale ones — incremental, only the
-        months since each was last fetched (see tools.lean_refresh)."""
+        """Staleness list of every tracked channel plus one-click batch
+        re-fetch of the stale ones — incremental, only the months since each
+        was last fetched (see tools.lean_refresh). The batch buttons cover
+        the common cases; per-row tick boxes + "Refresh selected" handle an
+        arbitrary hand-picked set. The list defaults to oldest-fetch-first
+        and re-sorts on any column-header click (_on_lean_header_clicked);
+        it shows up to _LEAN_VISIBLE_ROWS rows before it scrolls. The
+        folder-scoped "Refresh comments" control also lives here (moved from
+        the Folders card)."""
         card = SectionCard(self.tr_("lean_refresh_title"))
         self.lean_card_ref = card
+
+        self._lean_sort_col = 1        # Updated
+        self._lean_sort_desc = False   # oldest fetch first
 
         self.lean_help_lbl = QLabel(self.tr_("lean_refresh_help"))
         self.lean_help_lbl.setObjectName("hint")
         self.lean_help_lbl.setWordWrap(True)
         card.body.addWidget(self.lean_help_lbl)
+
+        # "Refresh comments" (moved here from the Folders card): a lightweight
+        # partial re-fetch that only patches the `comments` field on each
+        # channel's already-stored checkpoint rows (see tools.comments_refresh)
+        # instead of a full re-scan — for a folder whose channels were fetched
+        # before that field existed, or whose comment counts have gone stale.
+        comments_row = QHBoxLayout()
+        self.comments_refresh_lbl = QLabel(self.tr_("folder_comments_refresh_label"))
+        comments_row.addWidget(self.comments_refresh_lbl)
+        self.comments_folder_combo = QComboBox()
+        comments_row.addWidget(self.comments_folder_combo, 1)
+        self.refresh_comments_btn = QPushButton(self.tr_("folder_comments_refresh_btn"))
+        self.refresh_comments_btn.setToolTip(self.tr_("folder_comments_refresh_hint"))
+        self.refresh_comments_btn.clicked.connect(self._on_refresh_comments_clicked)
+        comments_row.addWidget(self.refresh_comments_btn)
+        card.body.addLayout(comments_row)
 
         btn_row = QHBoxLayout()
         self.lean_oldest_btn = QPushButton(self.tr_("lean_refresh_oldest_btn"))
@@ -403,6 +414,14 @@ class ConfigView(QWidget):
         self.lean_3mo_btn.setToolTip(self.tr_("lean_refresh_3mo_hint"))
         self.lean_3mo_btn.clicked.connect(lambda: self._on_lean_refresh_clicked("3mo"))
         btn_row.addWidget(self.lean_3mo_btn)
+        self.lean_selected_btn = QPushButton(self.tr_("lean_refresh_selected_btn"))
+        self.lean_selected_btn.setToolTip(self.tr_("lean_refresh_selected_hint"))
+        self.lean_selected_btn.clicked.connect(self._on_lean_refresh_selected)
+        btn_row.addWidget(self.lean_selected_btn)
+        self.lean_selected_2y_btn = QPushButton(self.tr_("lean_refresh_selected_2y_btn"))
+        self.lean_selected_2y_btn.setToolTip(self.tr_("lean_refresh_selected_2y_hint"))
+        self.lean_selected_2y_btn.clicked.connect(self._on_lean_refresh_selected_2y)
+        btn_row.addWidget(self.lean_selected_2y_btn)
         btn_row.addStretch()
         card.body.addLayout(btn_row)
 
@@ -410,25 +429,69 @@ class ConfigView(QWidget):
         self.lean_empty_lbl.setObjectName("hint")
         card.body.addWidget(self.lean_empty_lbl)
 
-        self.lean_table = QTableWidget(0, 3)
+        # col 0 = a per-row tick for "Refresh selected"; the checkboxes live
+        # in the cells (see refresh_lean_list), so edit triggers stay off but
+        # the check state is still user-toggleable. Clicking any other column
+        # header re-sorts the list (_on_lean_header_clicked).
+        self.lean_table = QTableWidget(0, 5)
         self._set_lean_headers()
         self.lean_table.verticalHeader().setVisible(False)
         self.lean_table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
         self.lean_table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
         lean_header = self.lean_table.horizontalHeader()
-        lean_header.setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
-        self.lean_table.setColumnWidth(0, 150)
-        self.lean_table.setColumnWidth(2, 110)
-        self.lean_table.setMaximumHeight(520)
+        lean_header.setSectionResizeMode(2, QHeaderView.ResizeMode.Stretch)
+        lean_header.setSectionsClickable(True)
+        lean_header.sectionClicked.connect(self._on_lean_header_clicked)
+        self.lean_table.setColumnWidth(0, 34)
+        self.lean_table.setColumnWidth(1, 150)
+        self.lean_table.setColumnWidth(3, 140)
+        self.lean_table.setColumnWidth(4, 110)
         card.body.addWidget(self.lean_table)
 
         self.refresh_lean_list()
         return card
 
+    # Rows to keep visible before the list starts scrolling.
+    _LEAN_VISIBLE_ROWS = 20
+    # Table columns that re-sort the list when their header is clicked
+    # (0 is the tick box). 4 (followers) defaults to descending, the rest asc.
+    _LEAN_SORT_COLS = (1, 2, 3, 4)
+
+    def _fit_lean_table_height(self, row_count: int) -> None:
+        """Lock the table to show up to _LEAN_VISIBLE_ROWS rows, scrolling
+        past that — the surrounding card would otherwise collapse it to a
+        few rows."""
+        shown = max(3, min(row_count, self._LEAN_VISIBLE_ROWS))
+        row_h = self.lean_table.verticalHeader().defaultSectionSize()
+        header_h = self.lean_table.horizontalHeader().height() or row_h
+        self.lean_table.setFixedHeight(
+            header_h + row_h * shown + 2 * self.lean_table.frameWidth())
+
     def _set_lean_headers(self) -> None:
         self.lean_table.setHorizontalHeaderLabels([
-            self.tr_("lean_refresh_col_updated"), self.tr_("lean_refresh_col_channel"),
+            "", self.tr_("lean_refresh_col_updated"),
+            self.tr_("lean_refresh_col_channel"), self.tr_("folder_export_col_folder"),
             self.tr_("col_followers")])
+
+    def _on_lean_header_clicked(self, col: int) -> None:
+        if col not in self._LEAN_SORT_COLS:
+            return
+        if col == self._lean_sort_col:
+            self._lean_sort_desc = not self._lean_sort_desc
+        else:
+            self._lean_sort_col = col
+            self._lean_sort_desc = col == 4   # followers reads best high-first
+        self.refresh_lean_list()
+
+    def _lean_sort_value(self, ch: dict, folder: str):
+        col = self._lean_sort_col
+        if col == 2:
+            return _channel_display_name(ch).casefold()
+        if col == 3:
+            return folder.casefold()
+        if col == 4:
+            return int(ch.get("members", 0) or 0)
+        return ch.get("fetched_at") or ""   # col 1 (Updated); missing sorts first
 
     @staticmethod
     def _utcnow() -> datetime:
@@ -444,11 +507,19 @@ class ConfigView(QWidget):
 
     def _lean_rows_sorted(self) -> list[dict]:
         """Every checkpoint summary, oldest fetch first (an unparseable /
-        missing fetched_at sorts to the very top — most in need of a look)."""
+        missing fetched_at sorts to the very top — most in need of a look).
+        Fixed age order for the batch buttons; the table's own display order
+        follows the clicked column header (see refresh_lean_list)."""
         return sorted(self.channel_store.list(), key=lambda d: d.get("fetched_at") or "")
 
     def refresh_lean_list(self) -> None:
-        rows = self._lean_rows_sorted()
+        folder_names = {f["id"]: f["name"] for f in self.folder_store.list_folders()}
+        folder_of = {ch["key"]: folder_names.get(
+            self.folder_store.folder_for_channel(ch["key"]), "")
+            for ch in self.channel_store.list()}
+        rows = sorted(self.channel_store.list(),
+                      key=lambda ch: self._lean_sort_value(ch, folder_of[ch["key"]]),
+                      reverse=self._lean_sort_desc)
         self.lean_empty_lbl.setVisible(not rows)
         self.lean_table.setVisible(bool(rows))
         self.lean_table.setRowCount(len(rows))
@@ -459,9 +530,31 @@ class ConfigView(QWidget):
                 updated = f"{dt:%Y-%m-%d} ({max(0, (now - dt).days)}d)"
             else:
                 updated = ch.get("fetched_at") or "—"
-            self.lean_table.setItem(i, 0, QTableWidgetItem(updated))
-            self.lean_table.setItem(i, 1, QTableWidgetItem(_channel_display_name(ch)))
-            self.lean_table.setItem(i, 2, QTableWidgetItem(fmt_int(ch.get("members", 0))))
+            tick = QTableWidgetItem()
+            tick.setFlags((tick.flags() & ~Qt.ItemFlag.ItemIsEditable)
+                          | Qt.ItemFlag.ItemIsUserCheckable)
+            tick.setCheckState(Qt.CheckState.Unchecked)
+            tick.setData(Qt.ItemDataRole.UserRole, ch["key"])
+            self.lean_table.setItem(i, 0, tick)
+            self.lean_table.setItem(i, 1, QTableWidgetItem(updated))
+            self.lean_table.setItem(i, 2, QTableWidgetItem(_channel_display_name(ch)))
+            self.lean_table.setItem(i, 3, QTableWidgetItem(folder_of[ch["key"]]))
+            self.lean_table.setItem(i, 4, QTableWidgetItem(fmt_int(ch.get("members", 0))))
+        hdr = self.lean_table.horizontalHeader()
+        hdr.setSortIndicatorShown(self._lean_sort_col in self._LEAN_SORT_COLS)
+        hdr.setSortIndicator(
+            self._lean_sort_col,
+            Qt.SortOrder.DescendingOrder if self._lean_sort_desc
+            else Qt.SortOrder.AscendingOrder)
+        self._fit_lean_table_height(len(rows))
+
+    def _lean_checked_keys(self) -> list[str]:
+        out: list[str] = []
+        for i in range(self.lean_table.rowCount()):
+            item = self.lean_table.item(i, 0)
+            if item is not None and item.checkState() == Qt.CheckState.Checked:
+                out.append(item.data(Qt.ItemDataRole.UserRole))
+        return out
 
     def _lean_candidates(self, mode: str) -> list[dict]:
         rows = self._lean_rows_sorted()
@@ -492,11 +585,46 @@ class ConfigView(QWidget):
             return
         self.lean_refresh([ch["key"] for ch in cands])
 
-    def lean_refresh(self, keys: list[str]) -> bool:
+    def _on_lean_refresh_selected(self) -> None:
+        keys = self._lean_checked_keys()
+        if not keys:
+            QMessageBox.information(self, self.tr_("app_title"),
+                                   self.tr_("lean_refresh_none_selected"))
+            return
+        if self.is_running():
+            QMessageBox.warning(self, self.tr_("app_title"), self.tr_("worker_running"))
+            return
+        reply = QMessageBox.question(
+            self, self.tr_("app_title"),
+            self.tr_("lean_refresh_confirm", count=len(keys)))
+        if reply != QMessageBox.StandardButton.Yes:
+            return
+        self.lean_refresh(keys)
+
+    def _on_lean_refresh_selected_2y(self) -> None:
+        keys = self._lean_checked_keys()
+        if not keys:
+            QMessageBox.information(self, self.tr_("app_title"),
+                                   self.tr_("lean_refresh_none_selected"))
+            return
+        if self.is_running():
+            QMessageBox.warning(self, self.tr_("app_title"), self.tr_("worker_running"))
+            return
+        reply = QMessageBox.question(
+            self, self.tr_("app_title"),
+            self.tr_("lean_refresh_full_confirm", count=len(keys)))
+        if reply != QMessageBox.StandardButton.Yes:
+            return
+        self.lean_refresh(keys, full_period="2y")
+
+    def lean_refresh(self, keys: list[str], full_period: str | None = None) -> bool:
         """Start a lean (incremental) refresh of `keys` — the months since
         each was last fetched, merged in (see tools.lean_refresh). Shared by
         the Config card's batch buttons and the dashboard's Refresh button.
-        Returns True if a worker was started."""
+        With `full_period` (a channel_stat PERIOD_DAYS key such as "2y") every
+        key is instead fully re-scanned over that window — slower, but the
+        only way to rebuild a channel's older history against current
+        per-post fields. Returns True if a worker was started."""
         keys = [k for k in keys if k]
         if not keys:
             return False
@@ -515,7 +643,9 @@ class ConfigView(QWidget):
             "phone": self.cfg.get("PHONE_NUMBER").strip(),
             "session": self.cfg.session_path(),
         }
-        self.worker = ToolWorker(run_lean_refresh, {"keys": keys}, conn, parent=self)
+        self.worker = ToolWorker(run_lean_refresh,
+                                 {"keys": keys, "full_period": full_period},
+                                 conn, parent=self)
         self.worker.sig_log.connect(self._append_log)
         self.worker.sig_progress.connect(self._on_progress)
         self.worker.sig_ask.connect(self._on_ask)
@@ -772,44 +902,85 @@ class ConfigView(QWidget):
                 continue
             score_entries(entries)
             for e in entries:
-                out[e["key"]] = (e["score"], e["views"], e["viral_share"], e["quality"])
+                # quality_display (readable 0-1000 gauge), not the Rating's
+                # internal quality term — see _channel_bucket_totals.
+                out[e["key"]] = (e["score"], e["views"], e["viral_share"],
+                                 e["quality_display"])
         return out
 
     @staticmethod
     def _channel_bucket_totals(data: dict, mode: str,
                                target_key: tuple | None) -> dict | None:
-        """{"views","shares","reactions","viral_share","quality"} for one
-        channel's full checkpoint, scoped to `mode` — "all" sums every
-        scanned post ever (`distributions.monthly`); "halfyear"/"season"
-        use just the one bucket matching `target_key`. None if the channel
-        has no data in scope at all (empty monthly history for "all", or no
-        bucket matching `target_key`), so the caller can tell "genuinely no
-        data" apart from "scored zero".
+        """{"views","shares","reactions","posts","viral_share","repost_share",
+        "quality","quality_display"} for one channel's full checkpoint, scoped
+        to `mode` — "all" sums every scanned post ever
+        (`distributions.monthly`); "halfyear"/"season" use just the one bucket
+        matching `target_key`. None if the channel has no data in scope at all
+        (empty monthly history for "all", or no bucket matching `target_key`),
+        so the caller can tell "genuinely no data" apart from "scored zero".
 
-        Quality is the same gauge score every post card/trend line in the
-        app shows (app.scoring), averaged over whatever of the channel's
-        stored top-N pool (`rows`) falls in scope — `rows` is a sample, not
-        every scanned post, same caveat as Folder Stats' own Post Quality
-        column (see FolderStatView._collect_periods)."""
+        Two quality figures ride along, both app.scoring's 0-1000 gauge over
+        the in-scope slice of the top-N `rows` pool (same caveat as Folder
+        Stats — `rows` is a sample). `quality_display` is the standard gauge
+        (viral_excess on, mean) — the readable "Post Quality" column, the
+        same number the dashboard shows. `quality` is the Rating's own take:
+        median (the pool skews to a channel's best posts) and
+        `viral_excess=False` (the Rating already scores reach via its views +
+        virality terms). Kept apart so tuning the Rating never makes the
+        displayed column unrecognisable. `posts` (the period's post count)
+        rides along so app.rating can score views/engagement per post.
+
+        Reposts (posts forwarded in from another channel — see
+        app.tools.channel_stat._is_repost) are excluded, exactly as in
+        FolderStatView._collect_periods: the monthly `*_own` totals drop
+        them, `_quality` skips `rows` entries flagged `repost`, and the
+        returned `repost_share` (percent of the period's posts that were
+        reposts) feeds app.rating's smooth repost-heavy score cut. Older
+        checkpoints without those fields fall back to counting every post,
+        report repost_share 0, and are unchanged until refetched."""
         monthly = data.get("distributions", {}).get("monthly") or []
-        avg_views = data.get("stats", {}).get("avg_views", 0) or 0
+        stats_ = data.get("stats", {})
+        # Recent average where available (a grown channel shouldn't score
+        # every recent post as a breakout — see channel_stat._recent_avg_views
+        # / FolderStatView._channel_avg_views), lifetime otherwise.
+        avg_views = float(stats_.get("avg_views_recent") or stats_.get("avg_views", 0) or 0)
 
-        def _quality(rows: list[dict]) -> float:
+        def _quality(rows: list[dict]) -> tuple[float, float]:
+            """(rating_quality, display_quality) — see docstring."""
+            rows = [r for r in rows if not r.get("repost")]
             if not rows:
-                return 0
-            return sum(post_gauge_value(post_score_raw(r, avg_views)) for r in rows) / len(rows)
+                return 0.0, 0.0
+            rating = median(post_gauge_value(post_score_raw(r, avg_views, viral_excess=False))
+                            for r in rows)
+            display = sum(post_gauge_value(post_score_raw(r, avg_views))
+                          for r in rows) / len(rows)
+            return rating, display
+
+        def _own(m: dict, field: str) -> int:
+            return int(m.get(f"{field}_own", m.get(field, 0)) or 0)
+
+        def _repost_share(own: int, total: int) -> float:
+            return (total - own) / total * 100 if total else 0
+
+        def _viral_share(viral: int, count: int) -> float:
+            return min(viral / count * 100 if count else 0, VIRAL_SHARE_DISPLAY_CAP)
 
         if mode == "all":
             if not monthly:
                 return None
-            count = sum(int(m.get("count", 0) or 0) for m in monthly)
-            viral_count = sum(int(m.get("viral_count", 0) or 0) for m in monthly)
+            count = sum(_own(m, "count") for m in monthly)
+            total = sum(int(m.get("count", 0) or 0) for m in monthly)
+            viral_count = sum(_own(m, "viral_count") for m in monthly)
+            quality, quality_display = _quality(data.get("rows", []) or [])
             return {
-                "views": sum(int(m.get("views", 0) or 0) for m in monthly),
-                "shares": sum(int(m.get("shares", 0) or 0) for m in monthly),
-                "reactions": sum(int(m.get("reactions", 0) or 0) for m in monthly),
-                "viral_share": viral_count / count * 100 if count else 0,
-                "quality": _quality(data.get("rows", []) or []),
+                "views": sum(_own(m, "views") for m in monthly),
+                "shares": sum(_own(m, "shares") for m in monthly),
+                "reactions": sum(_own(m, "reactions") for m in monthly),
+                "posts": count,   # app.rating divides views/engagement by this
+                "viral_share": _viral_share(viral_count, count),
+                "repost_share": _repost_share(count, total),
+                "quality": quality,
+                "quality_display": quality_display,
             }
 
         buckets: dict[tuple, dict] = {}
@@ -822,13 +993,14 @@ class ConfigView(QWidget):
             except ValueError:
                 continue
             key, _label = period_key_label(year, month, mode)
-            b = buckets.setdefault(key, {"count": 0, "views": 0, "shares": 0,
-                                         "reactions": 0, "viral_count": 0})
-            b["count"] += count
-            b["views"] += int(m.get("views", 0) or 0)
-            b["shares"] += int(m.get("shares", 0) or 0)
-            b["reactions"] += int(m.get("reactions", 0) or 0)
-            b["viral_count"] += int(m.get("viral_count", 0) or 0)
+            b = buckets.setdefault(key, {"count": 0, "count_total": 0, "views": 0,
+                                         "shares": 0, "reactions": 0, "viral_count": 0})
+            b["count"] += _own(m, "count")
+            b["count_total"] += count
+            b["views"] += _own(m, "views")
+            b["shares"] += _own(m, "shares")
+            b["reactions"] += _own(m, "reactions")
+            b["viral_count"] += _own(m, "viral_count")
         if target_key not in buckets:
             return None
         b = buckets[target_key]
@@ -841,10 +1013,14 @@ class ConfigView(QWidget):
                 continue
             if period_key_label(dt.year, dt.month, mode)[0] == target_key:
                 period_rows.append(r)
+        quality, quality_display = _quality(period_rows)
         return {
             "views": b["views"], "shares": b["shares"], "reactions": b["reactions"],
-            "viral_share": b["viral_count"] / b["count"] * 100 if b["count"] else 0,
-            "quality": _quality(period_rows),
+            "posts": b["count"],   # app.rating divides views/engagement by this
+            "viral_share": _viral_share(b["viral_count"], b["count"]),
+            "repost_share": _repost_share(b["count"], b["count_total"]),
+            "quality": quality,
+            "quality_display": quality_display,
         }
 
     def _on_export_folders_md(self) -> None:
@@ -934,6 +1110,10 @@ class ConfigView(QWidget):
         self.lean_1mo_btn.setToolTip(self.tr_("lean_refresh_1mo_hint"))
         self.lean_3mo_btn.setText(self.tr_("lean_refresh_3mo_btn"))
         self.lean_3mo_btn.setToolTip(self.tr_("lean_refresh_3mo_hint"))
+        self.lean_selected_btn.setText(self.tr_("lean_refresh_selected_btn"))
+        self.lean_selected_btn.setToolTip(self.tr_("lean_refresh_selected_hint"))
+        self.lean_selected_2y_btn.setText(self.tr_("lean_refresh_selected_2y_btn"))
+        self.lean_selected_2y_btn.setToolTip(self.tr_("lean_refresh_selected_2y_hint"))
         self.lean_empty_lbl.setText(self.tr_("lean_refresh_empty"))
         self._set_lean_headers()
         self.refresh_lean_list()

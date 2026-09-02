@@ -8,7 +8,8 @@ to reuse it.
     comments      = min(comments, 100)   # capped — see below
     reaction_wt   = min(reactions, 1000) × 0.045
                   + max(0, min(reactions, 10000) − 1000) × 0.005
-    viral_excess  = max(0, views − channel's avg_views)
+    viral_excess  = max(0, views − avg_views), then capped at
+                    VIRAL_EXCESS_CAP_MULT × avg_views  # see below
     ERV% = (forwards × 1.0 + comments × 0.25 + reaction_wt
             + viral_excess × 0.2) / views × 100
     raw  = ERV% × 100
@@ -33,31 +34,37 @@ capture — so a flat weight would let them dominate the score more than they
 should; tapering in brackets keeps a post's first reactions meaningful
 without letting a runaway count keep adding weight forever). A post that
 beat its own channel's average views also earns a "viral excess" bonus
-(floored at 0, so an under-average post gets neither bonus nor penalty) —
-weighted at 0.2, but since it's still divided by the post's own views
-afterward, this term alone can only ever contribute 0-20% of ERV%, so a
-breakout post gets rewarded without swamping the engagement terms above.
-Views themselves stay the ratio's denominator throughout, not a
-directly-weighted term. This is still a plain per-post ratio, so it
-doesn't reward a post just for being the most-viewed one on raw terms — the
-viral-excess bonus only rewards *beating its own channel's usual reach*,
-which is a different thing (a channel's biggest post is often just the one
-that happened to reach the widest audience, not necessarily the best
-content — but a post that's unusually large *for that channel* really is
-signal). An earlier version of the High-Quality Posts view scored whole
-*channels* using a channel-level "Virality Index" (max_views / avg_views,
-trimmed/capped to tame single-post outliers) that was dropped once that
-view switched to scoring individual posts — the viral-excess term above is
-a deliberate, narrower reintroduction of that same avg_views comparison at
-the per-post level, not a return to scoring whole channels.
+(floored at 0, so an under-average post gets neither bonus nor penalty),
+weighted at 0.2. Left uncapped this term misbehaves: `views − avg_views`
+grows without limit, and because the stored `rows` pool is *selected* for
+high views, on a channel with a low average almost every pool post beats it
+several-fold, pinning the whole pool near the term's ~20%-of-ERV asymptote
+and drowning out forwards/reactions entirely (one channel's whole grid
+reading ~700). So `viral_excess` is capped at VIRAL_EXCESS_CAP_MULT ×
+avg_views: a post is credited for beating its average by up to ~2× and no
+more — past that it has gone *viral*, which is a channel-level signal
+(`viral_post_share`, and the Rating's own virality term), not a mark of the
+post's craft. With the cap the term peaks (~10% of ERV) around 2× average
+and then fades as raw views climb, so forwards and reactions decide the
+ranking among a channel's genuine hits. Views themselves stay the ratio's
+denominator throughout, never a directly-weighted term. An earlier version
+of the High-Quality Posts view scored whole *channels* on a "Virality Index"
+(max_views / avg_views, trimmed to tame single-post outliers), dropped once
+that view switched to scoring individual posts — this capped viral-excess
+term is a deliberate, narrower reintroduction of the same avg_views
+comparison at the per-post level.
 
 A post with an inline keyboard (`row["has_buttons"]`, set by
 app.tools.channel_stat from Telethon's `Message.reply_markup`) scores 0
 outright, before any of the above — ad/CTA posts commonly attach one, and
 whatever engagement they draw is being pulled by the button, not the
 content, so they shouldn't surface as "high quality" regardless of their
-raw numbers. Checkpoints fetched before this field existed just don't have
-it, so nothing is excluded there until refetched.
+raw numbers. A post forwarded in from another channel (`row["repost"]`, see
+app.tools.channel_stat._is_repost) likewise scores 0 — its views and
+reactions were earned by the original author, not by the channel reposting
+it, so it isn't a signal of *this* channel's content quality. Checkpoints
+fetched before these fields existed just don't have them, so nothing is
+excluded there until refetched.
 """
 from __future__ import annotations
 
@@ -77,6 +84,11 @@ REACTION_TIER2_WEIGHT = 0.005
 # A post that pulled in more views than its own channel's average is
 # rewarded for that too — see module docstring.
 VIRAL_WEIGHT = 0.2
+# ...but only for beating the average by up to this multiple; past that the
+# post has gone viral (a channel-level signal), not shown better craft, and
+# an uncapped `views − avg_views` otherwise pins a whole selected pool near
+# the term's asymptote. See the module docstring.
+VIRAL_EXCESS_CAP_MULT = 1.0
 
 # Real median raw post score across this app's checkpoints (post the
 # forward/comment/reaction/viral weighting above) — chosen so a typical
@@ -90,17 +102,37 @@ def reaction_weighted(reactions: int) -> float:
     return tier1 + tier2
 
 
-def post_score_raw(row: dict, avg_views: float) -> float:
+def viral_excess_value(views: float, avg_views: float) -> float:
+    """`max(0, views − avg_views)`, capped at VIRAL_EXCESS_CAP_MULT × avg_views
+    so a genuine breakout is credited but a viral megahit isn't scored as
+    ever-higher "quality" — see the module docstring. The cap is skipped when
+    avg_views is unknown (0, a pre-`avg_views` checkpoint)."""
+    excess = max(0.0, views - avg_views)
+    if avg_views > 0:
+        excess = min(excess, VIRAL_EXCESS_CAP_MULT * avg_views)
+    return excess
+
+
+def post_score_raw(row: dict, avg_views: float, *, viral_excess: bool = True) -> float:
     """ERV% × 100 for one post — see module docstring. `avg_views` is that
     post's own channel's average (checkpoint `stats.avg_views`).
 
-    Scores 0 outright for a post with an inline keyboard (`has_buttons`,
-    see app.tools.channel_stat) — an ad/CTA button is what's driving
-    engagement there, not the content, so it shouldn't rank as
-    high-quality regardless of its raw numbers. Checkpoints fetched before
-    that field existed don't have it and so are never excluded until
-    refetched."""
-    if row.get("has_buttons"):
+    Scores 0 outright for a post with an inline keyboard (`has_buttons`) —
+    an ad/CTA button is what's driving engagement there, not the content —
+    or one forwarded in from another channel (`repost`, see
+    app.tools.channel_stat._is_repost), whose engagement was earned by the
+    original author rather than the reposting channel. Checkpoints fetched
+    before those fields existed don't have them and so are never excluded
+    until refetched.
+
+    `viral_excess=False` drops the "beat your own channel's average views"
+    bonus term (item 4 in the module docstring). app.rating passes this when
+    it averages the gauge per channel for the composite Rating's *quality*
+    term — that Rating already scores reach directly (its views term) and
+    virality separately, so crediting a post's raw reach a third time inside
+    "quality" just triple-counts the same signal. The standalone High-Quality
+    Posts grid and the dashboard keep the term (the default)."""
+    if row.get("has_buttons") or row.get("repost"):
         return 0.0
     views = int(row.get("views", 0) or 0)
     if not views:
@@ -108,9 +140,10 @@ def post_score_raw(row: dict, avg_views: float) -> float:
     reactions = int(row.get("reactions", 0) or 0)
     forwards = int(row.get("forwards", 0) or 0)
     comments = min(int(row.get("comments", 0) or 0), COMMENT_CAP)
-    viral_excess = max(0.0, views - avg_views)
     weighted = (forwards * FORWARD_WEIGHT + comments * COMMENT_WEIGHT
-               + reaction_weighted(reactions) + viral_excess * VIRAL_WEIGHT)
+               + reaction_weighted(reactions))
+    if viral_excess:
+        weighted += viral_excess_value(views, avg_views) * VIRAL_WEIGHT
     erv_pct = weighted / views * 100
     return erv_pct * 100
 
@@ -142,7 +175,7 @@ def score_tooltip(tr, label: str, row: dict, avg_views: float,
     forwards = int(row.get("forwards", 0) or 0)
     comments = min(int(row.get("comments", 0) or 0), COMMENT_CAP)
     rw = reaction_weighted(reactions)
-    viral_excess = max(0.0, views - avg_views)
+    viral_excess = viral_excess_value(views, avg_views)
     header = tr("cqi_post_tooltip", label=label, score=f"{raw_score:.1f}")
     erv_pct = (
         (forwards * FORWARD_WEIGHT + comments * COMMENT_WEIGHT + rw

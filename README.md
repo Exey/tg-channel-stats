@@ -33,7 +33,8 @@ For a chosen channel and time window, a single pass over the channel's history
 produces one JSON checkpoint holding:
 
 - **Engagement ranking** — per-post views, reactions, forwards ("private
-  reposts"), comments, and media type, with albums merged into one row. It
+  reposts"), comments, media type, and whether the post was itself forwarded
+  in from another channel, with albums merged into one row. It
   keeps the union of the top-N by each metric *plus* the most recent top-N
   *plus* the best post of every calendar month, so the on-screen table can
   re-sort by any column and still show the true leaders, and the
@@ -83,8 +84,7 @@ The **Folders** and **Tags** cards sit at the top:
   from the sidebar's right-click menu, the dashboard's folder button, or the
   "assign every channel to a folder" bulk action here. The sidebar can group
   and sort by folder. Also here: a **Markdown export** (one row per channel,
-  optionally with per-period Rating / Views / Viral share) and **Refresh
-  comments** (re-read just the comment count for a folder's channels).
+  optionally with per-period Rating / Views / Viral share).
 - **Tags** — a lightweight one-tag-per-channel taxonomy loaded from a
   Markdown table (`| tag | long tag | description |`); edit the source `.md`
   and reload to change the tag set. Only the per-channel assignment is
@@ -104,7 +104,13 @@ For one folder and period, a grid of individual **posts** (not channels)
 ranked by content quality — proportional engagement relative to that post's
 own reach, not raw view count (see
 [scoring.py](#per-post-content-quality)). Filters for minimum
-followers, hiding text-only posts, and per-channel caps. Optional on-demand
+followers, hiding text-only posts, and per-channel caps. On a Top 50+ slate
+a follower-scaled per-channel cap balances the list; the per-channel-limit
+dropdown's **"Rein in dominant channel"** option (between *No limit* and
+*7 per channel*) instead applies an anomaly cap — no fixed limit, but any
+single channel holding more than ~11 slots and 3× the typical channel's
+share is trimmed to 11, so one prolific channel can't crowd out the variety.
+Optional on-demand
 **thumbnail fetch** (downloads only the smallest preview image for the posts
 on screen into a local cache — nothing else in the app downloads media).
 Export as a Markdown table or a copyable Tg-links list with a "top authors"
@@ -138,16 +144,21 @@ and appends just the MPR Pairs table (`## Пары ВП`).
 - **Named profiles** — keep several accounts/API keys side by side.
 - **`.env` import/export** of connection settings (also understands
   `TG_API_ID` / `TG_API_HASH` / `TG_PHONE` naming).
-- **Refresh comments** — a folder-wide action (on the Folders & Tags view)
-  that re-reads just the comment count for stored posts (added after some
-  checkpoints were fetched) without a full re-scan.
+- **Refresh comments** — a folder-wide action (on the Config screen's Lean
+  refresh card) that re-reads just the comment count for stored posts (added
+  after some checkpoints were fetched) without a full re-scan.
 - **Lean refresh** — the dashboard's **Refresh** button, and a Config-screen
-  card with a staleness list of every tracked channel (oldest fetch first,
-  with age, name and followers) plus one-click batch buttons: **Oldest 10**,
-  **1 mo+**, **3 mo+**. It's *incremental* — only the months since a channel
+  card with a staleness list of every tracked channel (age, name, folder and
+  followers; click a column header to re-sort, defaults to oldest fetch
+  first) plus one-click batch buttons: **Oldest 10**, **1 mo+**, **3 mo+**,
+  and **Refresh selected** for the rows you tick in the list. It's
+  *incremental* — only the months since a channel
   was last fetched are re-scanned and merged into the existing checkpoint,
   so a monthly cadence re-reads ~1 month instead of the whole stored 2–3
   year period. (A checkpoint too old to merge falls back to one full scan.)
+  **Re-fetch selected · 2 y** does a full (non-incremental) 2-year re-scan
+  of the ticked channels — the way to rebuild older history against per-post
+  fields added since the last fetch (reposts, ad buttons, comments).
 
 ### UI
 
@@ -177,7 +188,7 @@ checkpoint's `stats`:
 | **ERR%** (engagement rate by reach) | `avg_views_settled / members × 100` | `avg_views_settled` averages only posts older than 14 days, whose view count has settled. |
 | **ERV%** (engagement rate by views) | `(avg_reactions + avg_reposts) / avg_views × 100` | Shown on the dashboard and Compare views. |
 | **Virality index** | `max_views / avg_views` | Spread between the best post and the average — how often the channel lands an outlier hit. |
-| **Viral post share** | `% of posts with views > 2 × avg_views` | Feeds the Rating and Mutual PR math. |
+| **Viral post share** | `% of posts with views > 2 ×` the **trailing-3-month** avg views/post, capped per-month at 50% and per-period at 40% | Trailing baseline, not the channel's lifetime `avg_views` (`_viral_baseline`, `VIRAL_BASELINE_MONTHS`). Against the lifetime figure a channel that has merely *grown* reads ~90% viral; against its own month the growth vanishes. A trailing window sits between: a real growth spurt shows elevated virality for a quarter or so, then settles. Thin windows (< 6 prior posts) fall back to the lifetime average; at most `VIRAL_MONTHLY_CAP_FRAC` (50%) of a month can be "viral"; and the figure shown in Folder Stats / the export is clamped to `VIRAL_SHARE_DISPLAY_CAP` (40%) — that also caps a stale checkpoint (fetched before this fix) without waiting for a re-fetch. Feeds the Rating (which saturates virality at 15% anyway) and Mutual PR. |
 | **Avg reposts (trimmed)** | mean after dropping the top 10% of posts by repost count | Reposts are far more top-heavy than views/reactions, so the plain average swings on one-off spikes. |
 
 ### Per-post content quality
@@ -191,16 +202,30 @@ and Mutual PR's "Interest".
 Per post, given the post's `views`, `reactions`, `forwards`, `comments`, and
 its channel's `avg_views`:
 
-1. A post with an **inline keyboard** (`has_buttons`) scores **0** outright —
-   an ad/CTA button is what's driving its engagement, not the content.
+1. A post with an **inline keyboard** (`has_buttons`), or one **forwarded in
+   from another channel** (`repost`), scores **0** outright — for the first,
+   an ad/CTA button is what's driving engagement, not the content; for the
+   second, the views and reactions were earned by the original author, not
+   by the channel reposting it.
 2. `comments` are capped at 100 (past that a post clearly has real
    discussion either way).
 3. `reaction_wt` is tapered in two brackets: the first 1 000 reactions count
    at 0.045 each, 1 000–10 000 at only 0.005 each, beyond 10 000 nothing more
    is added (reaction counts can run anomalously high relative to a post's
    own views).
-4. `viral_excess = max(0, views − avg_views)` — a bonus for beating the
-   channel's *own* usual reach, weighted 0.2.
+4. `viral_excess = max(0, views − avg)`, **capped at `VIRAL_EXCESS_CAP_MULT`
+   (1×) `avg`** — a bonus for beating the channel's usual reach, weighted
+   0.2. Two guards keep it from becoming "score = view multiple":
+   - **`avg` is `stats.avg_views_recent`** (trailing ~3 months) where the
+     checkpoint has it, not the lifetime average — otherwise a channel that
+     merely *grew* has every recent post beating its frozen lifetime figure,
+     and the whole grid reads a flat ~700.
+   - **the cap**: past ~2× `avg` the post has gone viral (a channel-level
+     signal), not shown better craft — the term peaks (~10% of ERV) around
+     2× and then fades.
+
+   Used by the High-Quality Posts grid and the dashboard; the composite
+   Rating passes `viral_excess=False` (it already has views + virality terms).
 5. `ERV% = (forwards×1.0 + comments×0.25 + reaction_wt + viral_excess×0.2) / views × 100`
 6. `raw = ERV% × 100`
 7. `gauge = 1000 × raw / (raw + 580)` — a saturating curve onto the 0–1000
@@ -219,24 +244,74 @@ forwards (a deliberate, costly share) first, then comments, then reactions
 are grouped by folder and each channel is normalized against **only its own
 folder's peers** for the same period.
 
-For each channel entry in a period bucket (`views`, `shares`, `reactions`,
-`quality`, `viral_share`):
+**Reposts are excluded from every term.** A post the channel forwarded in
+from another channel (`repost`, see `_is_repost` in
+[channel_stat.py](#stats--scoring-algorithms)) is dropped from the period's
+`views` / `shares` / `reactions` / `viral_share` / `posts` totals and from
+the quality median — so a channel can't lift its Rating by reposting a
+bigger channel's viral hit. (Channel-level stat cards, ERR%/ERV% and Mutual
+PR still count reposts.)
 
-- **views** — min-max normalized within the bucket, weight `0.70` (the
-  single biggest weight).
-- **engagement** — `shares + 0.05 × reactions`, min-max normalized, weight
-  `0.65`. Reactions count for only 5% of raw value because reaction counts
-  are the easier of the two to artificially pump; a repost is a costlier,
-  harder-to-fake action.
-- **quality** — the per-post gauge above, averaged per channel per period,
-  min-max normalized, weight `0.45`.
+**Repost-heavy penalty.** On top of that exclusion, a channel whose feed
+*is* largely reposts takes a smooth flat cut to the composite score: nothing
+while reposts are ≤ 20% of the period's posts, ramping linearly to a 30% cut
+by the time they hit 30%, and held there above that (`repost_share_penalty`,
+constants `REPOST_SHARE_PENALTY_START` / `_FULL` / `_MAX`). Coasting on other
+people's posts is less original work than the post count suggests.
+
+For each channel entry in a period bucket (`views`, `shares`, `reactions`,
+`posts`, `quality`, `viral_share`):
+
+- **views/post** — `views ÷ posts` (mean views **per post** — reach
+  *efficiency*), min-max normalized within the bucket, weight `0.42`.
+  Per-post, not the period total, so a channel can't climb the Rating just by
+  posting 3× as often.
+- **total reach** — `log10` of the absolute period `views`, **capped** at
+  `(views ÷ posts) × the folder's median post count`, min-max normalized,
+  weight `0.42`. The counterweight to views/post: a small channel with a
+  lucky per-post average still loses here to a genuine heavyweight — but the
+  cap means a flood of low-value posts past the folder's normal cadence buys
+  no extra rating, and `log10` keeps one giant from flattening everyone else.
+- **engagement** — `(shares + 0.05 × reactions) ÷ posts`, also per-post,
+  min-max normalized, weight `0.65`. Reactions count for only 5% of raw value
+  because reaction counts are the easier of the two to artificially pump; a
+  repost is a costlier, harder-to-fake action.
+- **quality** — the per-post gauge above but with the *viral-excess* term
+  dropped (reach is already the views and virality terms — no triple count),
+  taken as the **median** over the channel's stored top-N pool for the period
+  (median, not mean: the pool skews toward a channel's best posts), min-max
+  normalized, weight `0.45`. (The Rating consumes this; the readable
+  **Post Quality** column shown in the view/export is a *separate* figure —
+  the standard 0–1000 gauge, viral-excess included, mean — so tuning the
+  Rating never turns the displayed number into single digits.)
+- **forward rate** — `shares ÷ views` (forwards per view — how often a viewer
+  thought the post worth re-sharing, size-independent), min-max normalized,
+  weight `0.40`. Separates "big loyal audience that taps a reaction" from
+  "content people actually spread".
 - **virality** — an *absolute* (not normalized) curve over `viral_share`:
   0% → 0, 1% → 0.05, ramping to 1.0 at 15%+. Its weight itself ramps from
   `0.10` to `0.51` as `viral_share` climbs to 15%, so virality matters more
   to a channel that actually is viral.
 
-`score = (weighted sum of the four terms) / (sum of the four actual
-weights)` — that division is the one and only normalization step.
+`views ÷ posts` and `engagement ÷ posts` divide by `max(posts, 8)`
+(`RATE_MIN_POSTS`), so a channel with a handful of posts in the period can't
+top the bucket on the "average" of one lucky hit.
+
+`score = (weighted sum of the terms) / (sum of the actual weights)` — that
+division is the one and only normalization step.
+
+**Reach bonus.** On top of the capped total-reach term, a small flat lift
+(`reach_bonus`) is *added* for a channel whose period `views` run *well*
+above the folder's median: nothing up to `REACH_BONUS_START` (4×) the median,
+ramping to `REACH_BONUS_MAX` (0.15) by `REACH_BONUS_FULL` (12×). Additive,
+applied **last** (after the penalties below), capped at 1.0 — it only nudges
+the very top of the folder and never reshuffles the rest.
+
+**Confidence dampener:** the final score is scaled down linearly once the
+period post count drops below `CONFIDENCE_MIN_POSTS` (12; 4 posts → ×0.33) —
+a rating built off 3 posts, one of which happened to land, is noise. (The
+"small channel with a lucky per-post average" case is handled by the capped
+total-reach term above, not here.)
 
 **Zero-reposts red flag:** a channel with ~0 reposts in the period has its
 `viral_share` cut by 40% *before* the virality curve, and the whole
@@ -464,10 +539,11 @@ assets/svgs/                # UI icons
   accurate; the reposts-between-channels table and per-post quality rely on
   the stored top-N sample, so they're only as complete as the top-N and
   "include public reposts" choices made when each channel was fetched.
-- **New per-post fields** (`comments`, `media_type`, `has_buttons`) are only
-  present on checkpoints fetched after they were added — older checkpoints
-  show 0 comments, a text-only placeholder icon, and no ad-button exclusion
-  until refetched (or, for comments, until "Refresh comments" is run).
+- **New per-post fields** (`comments`, `media_type`, `has_buttons`, `repost`)
+  are only present on checkpoints fetched after they were added — older
+  checkpoints show 0 comments, a text-only placeholder icon, and no
+  ad-button or repost exclusion until refetched (or, for comments, until
+  "Refresh comments" is run).
 - **Mutual PR forecasts are heuristics, not measurements** — see
   [scoring_pr.py](#mutual-pr-ad-swap-forecast). Treat the
   numbers as rough order-of-magnitude guidance.

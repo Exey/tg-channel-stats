@@ -91,9 +91,21 @@ EN = {
     "lean_refresh_3mo_btn": "3 mo+",
     "lean_refresh_3mo_hint": "Lean-refresh every channel last updated more "
                              "than 3 months ago.",
+    "lean_refresh_selected_btn": "Refresh selected",
+    "lean_refresh_selected_hint": "Lean-refresh only the channels ticked in "
+                                  "the list below.",
+    "lean_refresh_selected_2y_btn": "Re-fetch selected · 2 y",
+    "lean_refresh_selected_2y_hint": "Full re-scan (not incremental) of the "
+                                     "ticked channels over the last 2 years — "
+                                     "rebuilds every month with the current "
+                                     "per-post fields (reposts, buttons, "
+                                     "comments). Slower than a lean refresh.",
     "lean_refresh_confirm": "Lean-refresh {count} channel(s)?",
+    "lean_refresh_full_confirm": "Full re-fetch of {count} channel(s) over the "
+                                 "last 2 years? Slower than a lean refresh.",
     "lean_refresh_none": "Nothing that stale — every channel is more recent "
                          "than that.",
+    "lean_refresh_none_selected": "Tick at least one channel in the list first.",
     "lean_refresh_empty": "No channels tracked yet.",
     "lean_refresh_col_updated": "Updated",
     "lean_refresh_col_channel": "Channel",
@@ -250,9 +262,14 @@ EN = {
     "cqi_max_posts_hint": "How many top posts to show overall — in the grid, "
                          "the per-channel limit and the Tg Links list.",
     "cqi_tg_links_limit_hint": "Limit how many posts from the same channel "
-                               "are shown below and in the Tg Links list.",
+                               "are shown below and in the Tg Links list. "
+                               "\"Rein in dominant channel\" sets no fixed "
+                               "cap but, on a Top 50+ slate, trims any one "
+                               "channel holding more than 11 slots and 3× "
+                               "the typical channel's share down to 11.",
     "cqi_tg_links_limit_none": "No limit",
-    "cqi_tg_links_limit_n": "{n} per ch",
+    "cqi_tg_links_limit_anomaly": "Rein in dominant channel",
+    "cqi_tg_links_limit_n": "{n} per channel",
     "cqi_hide_non_media": "Hide non-media posts",
     "cqi_hide_non_media_hint": "Hide text-only posts (no photo, video, "
                                "voice/audio or other file) from the grid, "
@@ -528,8 +545,19 @@ RU = {
     "lean_refresh_3mo_btn": "3 мес+",
     "lean_refresh_3mo_hint": "Обновить все каналы, не обновлявшиеся более 3 "
                              "месяцев.",
+    "lean_refresh_selected_btn": "Обновить выбранные",
+    "lean_refresh_selected_hint": "Обновить только каналы, отмеченные в списке ниже.",
+    "lean_refresh_selected_2y_btn": "Пересканировать выбранные · 2 г",
+    "lean_refresh_selected_2y_hint": "Полное пересканирование (не инкрементное) "
+                                     "отмеченных каналов за последние 2 года — "
+                                     "перестраивает все месяцы с текущими "
+                                     "полями постов (репосты, кнопки, "
+                                     "комментарии). Медленнее лёгкого обновления.",
     "lean_refresh_confirm": "Обновить {count} канал(ов)?",
+    "lean_refresh_full_confirm": "Полное пересканирование {count} канал(ов) за "
+                                 "последние 2 года? Медленнее лёгкого обновления.",
     "lean_refresh_none": "Нет настолько старых — все каналы свежее.",
+    "lean_refresh_none_selected": "Отметьте в списке хотя бы один канал.",
     "lean_refresh_empty": "Пока нет отслеживаемых каналов.",
     "lean_refresh_col_updated": "Обновлён",
     "lean_refresh_col_channel": "Канал",
@@ -696,8 +724,13 @@ RU = {
     "cqi_max_posts_hint": "Сколько постов показывать всего — в сетке, "
                          "лимите по каналу и списке ссылок.",
     "cqi_tg_links_limit_hint": "Ограничить число постов одного канала ниже "
-                               "и в списке ссылок.",
+                               "и в списке ссылок. «Ограничить доминирующий "
+                               "канал» не задаёт фиксированный лимит, но в "
+                               "списке Топ 50+ обрезает любой канал, "
+                               "занимающий более 11 мест и 3× доли обычного "
+                               "канала, до 11.",
     "cqi_tg_links_limit_none": "Без ограничения",
+    "cqi_tg_links_limit_anomaly": "Ограничить доминирующий канал",
     "cqi_tg_links_limit_n": "{n} с канала",
     "cqi_hide_non_media": "Скрыть посты без медиа",
     "cqi_hide_non_media_hint": "Скрыть текстовые посты (без фото, видео, "

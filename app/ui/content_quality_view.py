@@ -14,10 +14,10 @@ other, so there's no risk of a circular import between them.
 Posts come from each channel's checkpoint `rows` — the stored top-N sample
 (see folder_stat_view's module docstring), not a fresh fetch — filtered to
 the selected period (Seasonal/Monthly/Year, same picker as Folder Stats,
-backed by app.periods), scored and sorted best-first, then capped at
-MAX_POSTS_SHOWN in _channel_limited_entries() (after the per-channel
-limit, not before — see that method's docstring) to keep the grid
-manageable for a big folder/period.
+backed by app.periods), scored and sorted best-first, then balanced across
+channels and capped at MAX_POSTS_SHOWN in _channel_limited_entries() (after
+the per-channel limits, not before — see that method's docstring) to keep
+the grid manageable, and varied, for a big folder/period.
 
 Thumbnails are opt-in: nothing in this app downloads post media by default
 (checkpoints only ever store text/counts), so the header's "Fetch media"
@@ -38,6 +38,7 @@ from __future__ import annotations
 
 import base64
 from datetime import datetime, timezone
+from statistics import median
 
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QFont, QFontMetrics, QPixmap
@@ -101,10 +102,14 @@ def _channel_ref(ch: dict) -> str:
 
 
 def _channel_avg_views(ch: dict) -> float:
-    """This channel's average views (checkpoint `stats.avg_views`, computed
-    by channel_stat.py over its whole scanned history) — 0 for a checkpoint
-    that predates that field or never settled a value."""
-    return float(ch.get("stats", {}).get("avg_views", 0) or 0)
+    """The reference a post's views are compared against for the quality
+    gauge's viral-excess term (app.scoring): the channel's *recent* average
+    (`stats.avg_views_recent`) so a channel that has merely grown doesn't
+    score every recent post as a breakout, falling back to the lifetime
+    `stats.avg_views` for older checkpoints / thin recent history, and 0 if
+    the checkpoint predates both."""
+    stats = ch.get("stats", {})
+    return float(stats.get("avg_views_recent") or stats.get("avg_views", 0) or 0)
 
 
 def _channel_members(ch: dict) -> int:
@@ -131,6 +136,18 @@ def _followers_cap(members: int) -> int | None:
 # fine, and vice versa).
 _TOP50_MIN_VIEWS = 4000
 _TOP50_MIN_SHARES = 11
+
+# One large channel (uncapped by _followers_cap) can still run away with a
+# big Top-N — e.g. 43 of its posts vs ~3 for the typical channel. When the
+# per-channel-limit combo is set to "Rein in dominant channel"
+# (_ANOMALY_SENTINEL), any channel holding both more than _ANOMALY_CAP slots
+# *and* at least _ANOMALY_FACTOR× the median channel's slot count is capped
+# to _ANOMALY_CAP and the slate refilled, so the freed slots spread down the
+# ranked list. Re-checked a few times in case the redistribution then makes
+# another channel run away. Only on Top 50+ (top50_rules).
+_ANOMALY_FACTOR = 3.0
+_ANOMALY_CAP = 11
+_ANOMALY_SENTINEL = -1   # tg_links_limit_combo data value for that option
 
 
 class ContentQualityView(QWidget):
@@ -229,6 +246,10 @@ class ContentQualityView(QWidget):
         self.tg_links_limit_combo = QComboBox()
         self.tg_links_limit_combo.setToolTip(self.tr_("cqi_tg_links_limit_hint"))
         self.tg_links_limit_combo.addItem(self.tr_("cqi_tg_links_limit_none"), 0)
+        # No fixed cap, but reins in a runaway channel — see
+        # _channel_limited_entries's anomaly-cap block.
+        self.tg_links_limit_combo.addItem(self.tr_("cqi_tg_links_limit_anomaly"),
+                                          _ANOMALY_SENTINEL)
         for n in (7, 6, 5, 4, 3, 2):
             self.tg_links_limit_combo.addItem(self.tr_("cqi_tg_links_limit_n", n=n), n)
         header.addWidget(self.tg_links_limit_combo)
@@ -636,6 +657,10 @@ class ContentQualityView(QWidget):
         posts: list[dict] = []
         for ch in self._channels:
             for row in ch.get("rows", []) or []:
+                # Forwarded in from another channel — its engagement isn't
+                # this channel's content (app.tools.channel_stat._is_repost).
+                if row.get("repost"):
+                    continue
                 if mode == "year":
                     dt = _parse_date(row.get("date", ""))
                     if dt is None or (cutoff is not None and dt < cutoff):
@@ -666,16 +691,20 @@ class ContentQualityView(QWidget):
         above, two more balance rules kick in (see `top50_rules` below):
         a per-channel cap scaled by follower count (_followers_cap) — on
         top of, and whichever is stricter than, the Tg Links limit combo's
-        own per-channel cap (0 = no cap) — and dropping any post that's
-        weak on *both* views and shares at once (neither alone disqualifies
-        it). Finally capped to at most the max-posts combo's current value
-        overall (default MAX_POSTS_SHOWN) — shared by the grid and the
-        generated Tg Links/MD exports so all three always agree on which
-        posts are "in scope". Applying the per-channel cap before the
-        overall cap means a restrictive limit still fills up to the
-        overall cap by reaching further down the ranked list across other
-        channels, the same as when no limit is set at all."""
-        limit = int(self.tg_links_limit_combo.currentData() or 0)
+        own per-channel cap (0 = no cap); and dropping any post that's weak
+        on *both* views and shares at once (neither alone disqualifies it).
+        With the per-channel-limit combo set to "Rein in dominant channel"
+        a third joins them: an anomaly cap on a single channel running away
+        with the slate (_ANOMALY_FACTOR / _ANOMALY_CAP). Finally capped to at
+        most the max-posts combo's current value overall (default MAX_POSTS_SHOWN) —
+        shared by the grid and the generated Tg Links/MD exports so all three
+        always agree on which posts are "in scope". Applying the per-channel
+        cap before the overall cap means a restrictive limit still fills up
+        to the overall cap by reaching further down the ranked list across
+        other channels, the same as when no limit is set at all."""
+        limit_data = self.tg_links_limit_combo.currentData() or 0
+        anomaly_cap_on = limit_data == _ANOMALY_SENTINEL
+        limit = limit_data if isinstance(limit_data, int) and limit_data > 0 else 0
         hide_non_media = self.hide_non_media_chk.isChecked()
         min_followers = int(self.min_followers_combo.currentData() or 0)
         max_posts = int(self.max_posts_combo.currentData() or MAX_POSTS_SHOWN)
@@ -684,32 +713,56 @@ class ContentQualityView(QWidget):
         # these extra rules only matter once there's enough room for them
         # to slip through.
         top50_rules = max_posts >= 50
-        seen: dict[str, int] = {}
-        out: list[dict] = []
-        for entry in self._post_entries:
-            if len(out) >= max_posts:
-                break
-            if hide_non_media and not (entry["row"].get("media_type") or ""):
-                continue
-            members = _channel_members(entry["channel"])
-            if min_followers and members < min_followers:
-                continue
-            if top50_rules:
-                views = int(entry["row"].get("views", 0) or 0)
-                shares = int(entry["row"].get("forwards", 0) or 0)
-                if views < _TOP50_MIN_VIEWS and shares < _TOP50_MIN_SHARES:
+
+        def _fill(anomaly_caps: dict[str, int]) -> tuple[list[dict], dict[str, int]]:
+            seen: dict[str, int] = {}
+            out: list[dict] = []
+            for entry in self._post_entries:
+                if len(out) >= max_posts:
+                    break
+                if hide_non_media and not (entry["row"].get("media_type") or ""):
                     continue
-            effective_limit = limit or None
-            if top50_rules:
-                fcap = _followers_cap(members)
-                if fcap is not None:
-                    effective_limit = fcap if effective_limit is None else min(effective_limit, fcap)
-            key = _channel_ref(entry["channel"])
-            count = seen.get(key, 0)
-            if effective_limit is not None and count >= effective_limit:
-                continue
-            seen[key] = count + 1
-            out.append(entry)
+                members = _channel_members(entry["channel"])
+                if min_followers and members < min_followers:
+                    continue
+                if top50_rules:
+                    views = int(entry["row"].get("views", 0) or 0)
+                    shares = int(entry["row"].get("forwards", 0) or 0)
+                    if views < _TOP50_MIN_VIEWS and shares < _TOP50_MIN_SHARES:
+                        continue
+                key = _channel_ref(entry["channel"])
+                effective_limit = limit or None
+                if top50_rules:
+                    fcap = _followers_cap(members)
+                    if fcap is not None:
+                        effective_limit = (fcap if effective_limit is None
+                                           else min(effective_limit, fcap))
+                acap = anomaly_caps.get(key)
+                if acap is not None:
+                    effective_limit = (acap if effective_limit is None
+                                       else min(effective_limit, acap))
+                if effective_limit is not None and seen.get(key, 0) >= effective_limit:
+                    continue
+                seen[key] = seen.get(key, 0) + 1
+                out.append(entry)
+            return out, seen
+
+        out, seen = _fill({})
+        # A channel dwarfing the slate (> _ANOMALY_CAP slots and ≥
+        # _ANOMALY_FACTOR× the median channel) → cap it and refill; re-check
+        # in case the freed slots then let another channel run away. Bounded
+        # so a degenerate folder can't loop. Opt-in (anomaly_cap_chk).
+        caps: dict[str, int] = {}
+        if anomaly_cap_on and top50_rules and len(seen) >= 3:
+            for _ in range(5):
+                mid = median(seen.values())
+                runaway = {k: _ANOMALY_CAP for k, n in seen.items()
+                           if k not in caps and n > _ANOMALY_CAP
+                           and n >= _ANOMALY_FACTOR * max(mid, 1)}
+                if not runaway:
+                    break
+                caps.update(runaway)
+                out, seen = _fill(caps)
         return out
 
     def _on_filter_changed(self, _index: int) -> None:
@@ -1031,7 +1084,10 @@ class ContentQualityView(QWidget):
         self.tg_links_limit_combo.setItemText(0, self.tr_("cqi_tg_links_limit_none"))
         for i in range(1, self.tg_links_limit_combo.count()):
             n = self.tg_links_limit_combo.itemData(i)
-            self.tg_links_limit_combo.setItemText(i, self.tr_("cqi_tg_links_limit_n", n=n))
+            if n == _ANOMALY_SENTINEL:
+                self.tg_links_limit_combo.setItemText(i, self.tr_("cqi_tg_links_limit_anomaly"))
+            else:
+                self.tg_links_limit_combo.setItemText(i, self.tr_("cqi_tg_links_limit_n", n=n))
         self.min_followers_combo.setToolTip(self.tr_("cqi_min_followers_hint"))
         self.min_followers_combo.setItemText(0, self.tr_("cqi_min_followers_none"))
         for i in range(1, self.min_followers_combo.count()):

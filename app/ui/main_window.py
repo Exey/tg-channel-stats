@@ -199,6 +199,7 @@ class MainWindow(QMainWindow):
         self.side.refresh_badges()
         self.config_view.refresh_folders_list()
         self.config_view.refresh_tags_list()
+        self.config_view.refresh_lean_list()   # keep the Lean refresh Folder column current
         self.folder_stat.refresh()
         self.content_quality.refresh()
         self.mutual_pr.refresh()
