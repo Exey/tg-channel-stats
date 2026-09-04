@@ -14,8 +14,9 @@ from ..folders import FolderStore
 from ..i18n import I18n
 from ..store import ChannelStore
 from ..tags import TagStore
-from .compare_charts_view import CompareChartsView
-from .compare_view import CompareView
+from .compare.compare_charts_view import CompareChartsView
+from .compare.compare_view import CompareView
+from .compare.mentions_view import MentionsView
 from .config_view import ConfigView
 from .content_quality_view import ContentQualityView
 from .dashboard_view import DashboardView
@@ -67,6 +68,8 @@ class MainWindow(QMainWindow):
         self.side.compare_mode_off.connect(self._on_compare_mode_off)
         self.side.compare_charts_selected.connect(self._show_compare_charts)
         self.side.compare_charts_mode_off.connect(self._on_compare_charts_mode_off)
+        self.side.compare_mentions_selected.connect(self._show_mentions)
+        self.side.compare_mentions_mode_off.connect(self._on_mentions_mode_off)
         self.side.fold_requested.connect(self._fold_sidebar)
         self.side.language_toggle_requested.connect(self._toggle_language)
         self.side.folders_changed.connect(self._on_folders_changed)
@@ -114,6 +117,7 @@ class MainWindow(QMainWindow):
         self.content_quality = ContentQualityView(self.i18n, self.folder_store, self.store, self.cfg)
         self.mutual_pr = MutualPrView(self.i18n, self.folder_store, self.store,
                                       self.tag_store)
+        self.mentions_view = MentionsView(self.i18n)
         self.stack.addWidget(self.config_view)       # index 0
         self.stack.addWidget(self.dashboard)         # index 1
         self.stack.addWidget(self.compare)           # index 2
@@ -121,6 +125,7 @@ class MainWindow(QMainWindow):
         self.stack.addWidget(self.compare_charts)    # index 4
         self.stack.addWidget(self.content_quality)   # index 5
         self.stack.addWidget(self.mutual_pr)         # index 6
+        self.stack.addWidget(self.mentions_view)     # index 7
         content_col.addWidget(self.stack, 1)
 
         content_wrap = QWidget()
@@ -285,6 +290,21 @@ class MainWindow(QMainWindow):
         else:
             self._show_config()
 
+    def _show_mentions(self, keys: list[str]) -> None:
+        # Live-updates as the sidebar selection changes (0-4 keys) — see
+        # SidePanel.compare_mentions_selected. Also an overlay: _current_key
+        # is left alone so turning the mode back off (see
+        # _on_mentions_mode_off) returns to whatever was open.
+        datas = [d for d in (self.store.load(k) for k in keys) if d]
+        self.mentions_view.load(datas)
+        self.stack.setCurrentWidget(self.mentions_view)
+
+    def _on_mentions_mode_off(self) -> None:
+        if self._current_key and self.side.has_channel(self._current_key):
+            self._show_channel(self._current_key)
+        else:
+            self._show_config()
+
     def _on_channel_fetched(self, payload: dict) -> None:
         key = self.store.save(payload)
         self._refresh_sidebar()
@@ -337,6 +357,7 @@ class MainWindow(QMainWindow):
         self.compare_charts.retranslate()
         self.content_quality.retranslate()
         self.mutual_pr.retranslate()
+        self.mentions_view.retranslate()
         self.unfold_btn.setToolTip(self.i18n.tr("nav_unfold_hint"))
 
     # --------------------------------------------------------------- theme

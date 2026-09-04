@@ -17,7 +17,8 @@ from ..folders import FolderStore
 from ..tags import TagStore
 from ..text_utils import consonant_abbreviation
 from ..version import __version__
-from .compare_view import MAX_COMPARE
+from .compare.compare_view import MAX_COMPARE
+from .compare.mentions_view import MAX_MENTIONS_COMPARE
 from .dashboard_view import short_num
 from .folder_dialog import FolderManagerDialog
 from .theme import COLORS
@@ -37,6 +38,8 @@ class SidePanel(QFrame):
     compare_mode_off = Signal()
     compare_charts_selected = Signal(list)  # 0-8 checkpoint keys, live-updates
     compare_charts_mode_off = Signal()
+    compare_mentions_selected = Signal(list)  # 0-4 checkpoint keys, live-updates
+    compare_mentions_mode_off = Signal()
     fold_requested = Signal()
     language_toggle_requested = Signal()
     folders_changed = Signal()
@@ -50,10 +53,13 @@ class SidePanel(QFrame):
         self.setFixedWidth(256)
         self.compare_mode = False
         self.compare_charts_mode = False
-        # Shared by both multi-select modes on purpose: switching from
-        # Compare to Compare Charts (or back) is meant to carry the current
-        # channel selection over, not reset it — see _toggle_compare_mode/
-        # _toggle_compare_charts_mode.
+        self.compare_mentions_mode = False
+        # Shared by all three multi-select modes on purpose: switching
+        # between Compare / Compare Charts / Mentions is meant to carry the
+        # current channel selection over, not reset it — see
+        # _toggle_compare_mode / _toggle_compare_charts_mode /
+        # _toggle_compare_mentions_mode. Mentions' lower MAX_MENTIONS_COMPARE
+        # cap just trims to the most-recently-selected on the way in.
         self._selected_keys: list[str] = []
         self._switching_modes = False
         self.folder_store = folder_store
@@ -150,19 +156,19 @@ class SidePanel(QFrame):
         root.addWidget(_bordered(self.mutual_pr_btn))
         root.addSpacing(4)
 
-        # Compare Charts + Compare Metrics share one row — neither is part of
-        # `self.group`: like Compare below, they repurpose channel clicks
-        # into a multi-select instead of single-page navigation, so they
-        # can't be an exclusive-group "current page" entry the way Config
-        # and Folder Stats are. Short "⚖️" labels (rather than the old
-        # "📈 Compare Charts" / "⭐ Compare Metrics") are what makes fitting
-        # both side by side possible without clipping.
+        # Compare Charts + Compare Metrics + Mentions share one row — none is
+        # part of `self.group`: like Compare below, they repurpose channel
+        # clicks into a multi-select instead of single-page navigation, so
+        # none can be an exclusive-group "current page" entry the way Config
+        # and Folder Stats are. Short, plain labels (no emoji/icon prefix)
+        # are what makes fitting all three side by side possible without
+        # clipping.
         compare_row = QHBoxLayout()
         compare_row.setSpacing(6)
         self.compare_charts_btn = QPushButton(i18n.tr("nav_compare_charts"))
         self.compare_charts_btn.setObjectName("ghost")
         self.compare_charts_btn.setCheckable(True)
-        self.compare_charts_btn.setStyleSheet("padding: 4px 8px;")
+        self.compare_charts_btn.setStyleSheet("padding: 4px 8px; font-size: 13px;")
         self.compare_charts_btn.setToolTip(i18n.tr("nav_compare_charts_hint"))
         self.compare_charts_btn.toggled.connect(self._toggle_compare_charts_mode)
         compare_row.addWidget(self.compare_charts_btn, 1)
@@ -170,10 +176,18 @@ class SidePanel(QFrame):
         self.compare_btn = QPushButton(i18n.tr("nav_compare"))
         self.compare_btn.setObjectName("ghost")
         self.compare_btn.setCheckable(True)
-        self.compare_btn.setStyleSheet("padding: 4px 8px;")
+        self.compare_btn.setStyleSheet("padding: 4px 8px; font-size: 13px;")
         self.compare_btn.setToolTip(i18n.tr("nav_compare_hint"))
         self.compare_btn.toggled.connect(self._toggle_compare_mode)
         compare_row.addWidget(self.compare_btn, 1)
+
+        self.mentions_btn = QPushButton(i18n.tr("nav_mentions"))
+        self.mentions_btn.setObjectName("ghost")
+        self.mentions_btn.setCheckable(True)
+        self.mentions_btn.setStyleSheet("padding: 4px 8px; font-size: 13px;")
+        self.mentions_btn.setToolTip(i18n.tr("nav_mentions_hint"))
+        self.mentions_btn.toggled.connect(self._toggle_compare_mentions_mode)
+        compare_row.addWidget(self.mentions_btn, 1)
         root.addLayout(compare_row)
         root.addSpacing(6)
 
@@ -275,7 +289,7 @@ class SidePanel(QFrame):
             # insert above the stretch (last item)
             self.list_lay.insertWidget(self.list_lay.count() - 1, btn)
             self._channel_btns[key] = btn
-        self.group.setExclusive(not (self.compare_mode or self.compare_charts_mode))
+        self.group.setExclusive(not self._any_compare_mode())
         self.refresh_badges()
 
     def _on_sort_folders_toggled(self, on: bool) -> None:
@@ -377,19 +391,34 @@ class SidePanel(QFrame):
         for key, btn in self._channel_btns.items():
             btn.setChecked(key in key_set)
 
+    def _any_compare_mode(self) -> bool:
+        return self.compare_mode or self.compare_charts_mode or self.compare_mentions_mode
+
+    def _exit_other_compare_modes(self, keep: str) -> None:
+        """Turn off whichever of the other two multi-select modes are on,
+        without clearing `_selected_keys` or emitting "mode off" — see the
+        callers below, and the module-level note on why the selection is
+        shared across all three."""
+        self._switching_modes = True
+        if keep != "compare" and self.compare_btn.isChecked():
+            self.compare_btn.setChecked(False)
+        if keep != "charts" and self.compare_charts_btn.isChecked():
+            self.compare_charts_btn.setChecked(False)
+        if keep != "mentions" and self.mentions_btn.isChecked():
+            self.mentions_btn.setChecked(False)
+        self._switching_modes = False
+
     def _toggle_compare_mode(self, on: bool) -> None:
         self.compare_mode = on
-        if on and self.compare_charts_mode:
+        if on and (self.compare_charts_mode or self.compare_mentions_mode):
             # Mutually exclusive multi-select modes, but switching between
             # them is meant to carry `_selected_keys` over — the guard stops
-            # the nested _toggle_compare_charts_mode(False) call this
-            # triggers from clearing the selection or emitting "mode off"
-            # (which would navigate away, e.g. back to Config) on its way
-            # out, since we're headed straight into Compare instead.
-            self._switching_modes = True
-            self.compare_charts_btn.setChecked(False)
-            self._switching_modes = False
-        self.group.setExclusive(not (self.compare_mode or self.compare_charts_mode))
+            # the nested toggle(False) calls this triggers from clearing the
+            # selection or emitting "mode off" (which would navigate away,
+            # e.g. back to Config) on their way out, since we're headed
+            # straight into Compare instead.
+            self._exit_other_compare_modes(keep="compare")
+        self.group.setExclusive(not self._any_compare_mode())
         if on:
             self.config_btn.setChecked(False)
             self._sync_checked_buttons(self._selected_keys)
@@ -402,11 +431,9 @@ class SidePanel(QFrame):
 
     def _toggle_compare_charts_mode(self, on: bool) -> None:
         self.compare_charts_mode = on
-        if on and self.compare_mode:
-            self._switching_modes = True
-            self.compare_btn.setChecked(False)  # mutually exclusive — see _toggle_compare_mode
-            self._switching_modes = False
-        self.group.setExclusive(not (self.compare_mode or self.compare_charts_mode))
+        if on and (self.compare_mode or self.compare_mentions_mode):
+            self._exit_other_compare_modes(keep="charts")  # see _toggle_compare_mode
+        self.group.setExclusive(not self._any_compare_mode())
         if on:
             self.config_btn.setChecked(False)
             self.folder_stat_btn.setChecked(False)
@@ -417,6 +444,30 @@ class SidePanel(QFrame):
             self._selected_keys.clear()
             self._sync_checked_buttons(self._selected_keys)
             self.compare_charts_mode_off.emit()
+
+    def _toggle_compare_mentions_mode(self, on: bool) -> None:
+        self.compare_mentions_mode = on
+        if on and (self.compare_mode or self.compare_charts_mode):
+            self._exit_other_compare_modes(keep="mentions")  # see _toggle_compare_mode
+        self.group.setExclusive(not self._any_compare_mode())
+        if on:
+            self.config_btn.setChecked(False)
+            self.folder_stat_btn.setChecked(False)
+            self.content_quality_btn.setChecked(False)
+            # Lower cap than Compare/Compare Charts — trim to the
+            # most-recently-selected on the way in rather than silently
+            # ignoring the carried-over tail.
+            if len(self._selected_keys) > MAX_MENTIONS_COMPARE:
+                stale = self._selected_keys[:-MAX_MENTIONS_COMPARE]
+                self._selected_keys = self._selected_keys[-MAX_MENTIONS_COMPARE:]
+                for k in stale:
+                    self._channel_btns[k].setChecked(False)
+            self._sync_checked_buttons(self._selected_keys)
+            self.compare_mentions_selected.emit(list(self._selected_keys))
+        elif not self._switching_modes:
+            self._selected_keys.clear()
+            self._sync_checked_buttons(self._selected_keys)
+            self.compare_mentions_mode_off.emit()
 
     def _on_channel_clicked(self, key: str) -> None:
         if self.compare_charts_mode:
@@ -429,6 +480,17 @@ class SidePanel(QFrame):
             elif key in self._selected_keys:
                 self._selected_keys.remove(key)
             self.compare_charts_selected.emit(list(self._selected_keys))
+            return
+        if self.compare_mentions_mode:
+            btn = self._channel_btns[key]
+            if btn.isChecked():
+                if len(self._selected_keys) >= MAX_MENTIONS_COMPARE:
+                    stale = self._selected_keys.pop(0)
+                    self._channel_btns[stale].setChecked(False)
+                self._selected_keys.append(key)
+            elif key in self._selected_keys:
+                self._selected_keys.remove(key)
+            self.compare_mentions_selected.emit(list(self._selected_keys))
             return
         if not self.compare_mode:
             self.channel_selected.emit(key)
@@ -480,6 +542,8 @@ class SidePanel(QFrame):
         self.sort_folders_btn.setToolTip(self.i18n.tr("nav_sort_folders_hint"))
         self.compare_charts_btn.setText(self.i18n.tr("nav_compare_charts"))
         self.compare_charts_btn.setToolTip(self.i18n.tr("nav_compare_charts_hint"))
+        self.mentions_btn.setText(self.i18n.tr("nav_mentions"))
+        self.mentions_btn.setToolTip(self.i18n.tr("nav_mentions_hint"))
         self.fold_btn.setToolTip(self.i18n.tr("nav_fold_hint"))
         self.lang_btn.setText(self.i18n.lang.upper())
         self.lang_btn.setToolTip(self.i18n.tr("nav_lang_hint"))

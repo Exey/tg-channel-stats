@@ -345,7 +345,6 @@ class SectionCard(Card):
         self.title_row = QHBoxLayout()
         self.title_lbl = QLabel(title)
         self.title_lbl.setObjectName("sectionTitle")
-        self.title_lbl.setVisible(bool(title))
         self.title_row.addWidget(self.title_lbl)
         self.title_row.addStretch(1)
         self.body.addLayout(self.title_row)

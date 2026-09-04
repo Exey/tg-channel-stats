@@ -134,6 +134,24 @@ def _is_repost(msg, own_channel_id: int) -> bool:
     return True
 
 
+def _repost_source(msg) -> tuple[int | None, str]:
+    """(origin channel_id, author byline) off a forward's `fwd_from` — data
+    Telethon already fetched with the message, no extra API call. Both are
+    best-effort: `from_id` is usually a bare PeerChannel with no name
+    attached (resolved against this app's own tracked channels at display
+    time — see app.ui.compare.mentions_view), and `post_author` is empty
+    unless the origin channel signed the post with a custom byline.
+    (None, "") if the post isn't a forward, or Telegram stripped its origin
+    (fwd_from set but from_id gone) — still a repost per _is_repost, just an
+    unnamed one."""
+    fwd = getattr(msg, "fwd_from", None)
+    if fwd is None:
+        return None, ""
+    channel_id = getattr(getattr(fwd, "from_id", None), "channel_id", None)
+    author = (getattr(fwd, "post_author", None) or "").strip()
+    return (int(channel_id) if channel_id is not None else None), author
+
+
 def _preview(text: str, limit: int = 140) -> str:
     text = " ".join((text or "").split())
     return text if len(text) <= limit else text[: limit - 1] + "…"
@@ -516,6 +534,7 @@ async def run_channel_stat(client, p: dict, ctx) -> str:
         media_type = _media_type(msg)
         has_buttons = _has_buttons(msg)
         is_repost = _is_repost(msg, info["id"])
+        repost_from_id, repost_from_author = _repost_source(msg)
 
         if gid is not None and gid == current_gid:
             # Same album — merge into the row being built (see channel_top).
@@ -530,6 +549,13 @@ async def run_channel_stat(client, p: dict, ctx) -> str:
             # whole merged post as button-driven.
             current["has_buttons"] = current["has_buttons"] or has_buttons
             current["repost"] = current["repost"] or is_repost
+            # Fill-in-only, like text/full_text below — a forwarded album
+            # shares one origin, so the anchor's own fwd_from (set at
+            # creation, just below) is normally already there.
+            if current["repost_from_id"] is None and repost_from_id is not None:
+                current["repost_from_id"] = repost_from_id
+            if not current["repost_from_author"] and repost_from_author:
+                current["repost_from_author"] = repost_from_author
             if media_type:
                 current["media_counts"][media_type] = (
                     current["media_counts"].get(media_type, 0) + 1)
@@ -565,6 +591,10 @@ async def run_channel_stat(client, p: dict, ctx) -> str:
                 "has_buttons": has_buttons,
                 # See _is_repost — likewise OR'd across the album.
                 "repost": is_repost,
+                # See _repost_source — filled in (not OR'd) across the
+                # album in the merge branch above.
+                "repost_from_id": repost_from_id,
+                "repost_from_author": repost_from_author,
                 "public": None,
             }
             current_gid = gid

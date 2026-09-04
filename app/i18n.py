@@ -6,7 +6,7 @@ EN = {
     # nav / sidebar
     "nav_config": "⚙️ Config",
     "nav_no_channels": "No channels yet — fetch one from the Config screen.",
-    "nav_compare": "⚖️⭐️ Metrics",
+    "nav_compare": "Metrics",
     "nav_compare_hint": "Pick 2-8 channels to compare.",
     "nav_sort_folders": "Sort by Members",
     "nav_sort_folders_active": "Sort by Folders",
@@ -281,10 +281,56 @@ EN = {
                               "channel can otherwise crowd out posts from "
                               "bigger channels worth featuring.",
     # compare charts view
-    "nav_compare_charts": "⚖️📈 Charts",
+    "nav_compare_charts": "Charts",
     "nav_compare_charts_hint": "Pick up to 8 channels to compare on charts.",
     "compare_charts_sub": "Views, shares and reactions over time for the "
                           "channels selected in the sidebar",
+    # mentions view
+    "nav_mentions": "Mentions",
+    "nav_mentions_hint": "Pick up to 4 channels to compare post texts and "
+                         "the names mentioned in them.",
+    "mentions_no_extraction": "Name extraction isn't available (transformers "
+                              "isn't installed, or its model couldn't be "
+                              "loaded) — texts still show below, but no names "
+                              "will be extracted from them.",
+    "mentions_period_label": "Mentions Period:",
+    "mentions_period_all": "All time",
+    "mentions_reload_btn": "Reload",
+    "mentions_reload_hint": "Re-read mentions.md from disk",
+    "mentions_reload_confirm": "Discard unsaved edits and reload mentions.md "
+                               "from disk?",
+    "mentions_empty": "Pick up to 4 channels from the sidebar's Mentions mode.",
+    "mentions_names_title_counts": "Posts {posts}, Names Found: {total}, "
+                                   "in mentions.md {linked}",
+    "mentions_similar_title": "Similar mentions",
+    "mentions_table_title": "mentions.md",
+    "mentions_locate_btn": "Show in folder",
+    "mentions_locate_hint": "Reveal mentions.md in Finder/Explorer",
+    "mentions_add_row_btn": "+ Row",
+    "mentions_save_btn": "Save",
+    "mentions_col_id": "id",
+    "mentions_col_names": "names",
+    "mentions_col_links": "unclear links",
+    "mentions_col_name": "Name",
+    "mentions_col_found": "mentions.md",
+    "mentions_col_posts": "Posts",
+    "mentions_col_post_id": "ID",
+    "mentions_col_date": "Date",
+    "mentions_col_type": "Type",
+    "mentions_col_text": "Text",
+    "mentions_forwarded_from": "Forwarded from {name}",
+    "mentions_forwarded": "Forwarded",
+    "mentions_link_btn": "Link…",
+    "mentions_ignore_btn": "Ignore",
+    "mentions_ignore_hint": "Not a name — never extract this again",
+    "mentions_link_new": "+ New id…",
+    "mentions_new_id_prompt": "Channel @username or full name (ФИО) for "
+                              "this person:",
+    "mentions_confirm_name_title": "Confirm name",
+    "mentions_confirm_name_prompt": "Text to attach (edit if the extractor "
+                                    "got this wrong):",
+    "mentions_delete_row_hint": "Remove this row from mentions.md",
+    "mentions_delete_row_confirm": "Remove \"{id}\" from mentions.md?",
     "compare_charts_empty": "Pick up to 8 channels from the sidebar to plot "
                             "them here.",
     # menus
@@ -462,7 +508,7 @@ RU = {
     "app_title": "TG Channel Stats",
     "nav_config": "⚙️ Настройки",
     "nav_no_channels": "Пока нет каналов — загрузите канал на экране «Настройки».",
-    "nav_compare": "⚖️⭐️ Метрики",
+    "nav_compare": "Метрики",
     "nav_compare_hint": "Выберите 2-8 каналов для сравнения.",
     "nav_sort_folders": "Сорт. по подпис.",
     "nav_sort_folders_active": "Сорт. по папкам",
@@ -743,10 +789,56 @@ RU = {
                               "маленький, но активный канал может "
                               "вытеснить посты более крупных каналов.",
     # compare charts view
-    "nav_compare_charts": "⚖️📈 Графики",
+    "nav_compare_charts": "Графики",
     "nav_compare_charts_hint": "Выберите до 8 каналов для сравнения на графиках.",
     "compare_charts_sub": "Просмотры, репосты и реакции по времени для "
                           "каналов, выбранных в боковой панели",
+    # mentions view
+    "nav_mentions": "Упоминания",
+    "nav_mentions_hint": "Выберите до 4 каналов, чтобы сравнить тексты постов "
+                         "и упомянутые в них имена.",
+    "mentions_no_extraction": "Извлечение имён недоступно (transformers не "
+                              "установлен или не удалось загрузить модель) — "
+                              "тексты постов всё равно показаны ниже, но имена "
+                              "из них извлекаться не будут.",
+    "mentions_period_label": "Период упоминаний:",
+    "mentions_period_all": "Всё время",
+    "mentions_reload_btn": "Обновить",
+    "mentions_reload_hint": "Перечитать mentions.md с диска",
+    "mentions_reload_confirm": "Отменить несохранённые изменения и "
+                               "перезагрузить mentions.md с диска?",
+    "mentions_empty": "Выберите до 4 каналов в режиме «Упоминания» боковой панели.",
+    "mentions_names_title_counts": "Постов {posts}, найдено имён: {total}, "
+                                   "в mentions.md {linked}",
+    "mentions_similar_title": "Похожие упоминания",
+    "mentions_table_title": "mentions.md",
+    "mentions_locate_btn": "Показать в папке",
+    "mentions_locate_hint": "Показать mentions.md в Finder/Проводнике",
+    "mentions_add_row_btn": "+ Строка",
+    "mentions_save_btn": "Сохранить",
+    "mentions_col_id": "id",
+    "mentions_col_names": "имена",
+    "mentions_col_links": "неясные ссылки",
+    "mentions_col_name": "Имя",
+    "mentions_col_found": "mentions.md",
+    "mentions_col_posts": "Посты",
+    "mentions_col_post_id": "ID",
+    "mentions_col_date": "Дата",
+    "mentions_col_type": "Тип",
+    "mentions_col_text": "Текст",
+    "mentions_forwarded_from": "Переслано от {name}",
+    "mentions_forwarded": "Переслано",
+    "mentions_link_btn": "Связать…",
+    "mentions_ignore_btn": "Игнорировать",
+    "mentions_ignore_hint": "Не имя — больше не извлекать",
+    "mentions_link_new": "+ Новый id…",
+    "mentions_new_id_prompt": "Юзернейм канала @username или полное имя "
+                              "(ФИО) этого человека:",
+    "mentions_confirm_name_title": "Подтвердите имя",
+    "mentions_confirm_name_prompt": "Текст для добавления (исправьте, если "
+                                    "извлечение ошиблось):",
+    "mentions_delete_row_hint": "Удалить эту строку из mentions.md",
+    "mentions_delete_row_confirm": "Удалить «{id}» из mentions.md?",
     "compare_charts_empty": "Выберите до 8 каналов в боковой панели, чтобы "
                             "построить графики.",
     "menu_file": "Файл",

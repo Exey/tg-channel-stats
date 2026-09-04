@@ -23,11 +23,11 @@ from PySide6.QtWidgets import (
     QVBoxLayout, QWidget,
 )
 
-from ..periods import period_key_label
-from ..scoring import post_gauge_value, post_score_raw
-from .charts import MultiLineChart
-from .dashboard_view import MONTHS_SHORT
-from .widgets import ChartCard
+from ...periods import period_key_label
+from ...scoring import post_gauge_value, post_score_raw
+from ..charts import MultiLineChart
+from ..dashboard_view import MONTHS_SHORT
+from ..widgets import ChartCard
 
 MAX_CHANNELS = 8
 

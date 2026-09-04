@@ -98,6 +98,13 @@ class ChannelStore:
                 "username": data.get("username", ""),
                 "fetched_at": data.get("fetched_at", ""),
                 "members": data.get("info", {}).get("members", 0) or 0,
+                # The channel's own numeric Telegram id -- already parsed
+                # into `data` above, so this costs nothing extra. Lets a
+                # forwarded post's bare fwd_from channel_id (see
+                # app.tools.channel_stat._repost_source) be matched back to
+                # one of this app's own tracked channels, e.g. in
+                # app.ui.compare.mentions_view.
+                "channel_id": data.get("info", {}).get("id"),
             })
         out.sort(key=lambda d: d.get("fetched_at", ""), reverse=True)
         return out

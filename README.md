@@ -34,7 +34,8 @@ produces one JSON checkpoint holding:
 
 - **Engagement ranking** — per-post views, reactions, forwards ("private
   reposts"), comments, media type, and whether the post was itself forwarded
-  in from another channel, with albums merged into one row. It
+  in from another channel (plus that forward's origin, when Telegram exposes
+  it — the Mentions view uses this), with albums merged into one row. It
   keeps the union of the top-N by each metric *plus* the most recent top-N
   *plus* the best post of every calendar month, so the on-screen table can
   re-sort by any column and still show the true leaders, and the
@@ -69,12 +70,80 @@ link list.
 
 ### Multi-channel comparison
 
-- **Metrics** (`⚖️⭐️`) — pick 2–8 channels from the sidebar and see their
+Three sidebar buttons, sharing one channel multi-select (switching between
+them carries the current selection over rather than resetting it):
+
+- **Metrics** — pick 2–8 channels from the sidebar and see their
   stat cards laid out one column per channel for an easy diff, exportable as
   a Markdown table.
-- **Charts** (`⚖️📈`) — pick up to 8 channels and overlay them on five
+- **Charts** — pick up to 8 channels and overlay them on five
   stacked trend charts (Quality, Views, Shares, Reactions, Posts), sharing
   one month/season toggle.
+- **Mentions** — pick up to 4 channels to compare post texts and the person
+  names mentioned in them (Russian NER via
+  [mawo-slovnet](https://github.com/mawo-ru/mawo-slovnet), backstopped by a
+  plain dictionary scan for names already in `mentions.md` that the model's
+  most common miss — a bare first name in a short, casual sentence —
+  otherwise wouldn't catch; see the Dependencies list below for the
+  alternatives that were tried and why they were reverted), one shared
+  **Mentions Period:** filter across all columns plus a **Reload** button
+  (same row, right-aligned) that re-reads `mentions.md` from disk on demand
+  — useful after hand-editing the file while the view's already open;
+  prompts first if there are unsaved edits, since a reload discards them.
+  `mentions.md` is also reloaded automatically whenever channels are
+  (re)opened here (skipped while there are unsaved edits), so found/not-found
+  status can't go stale across a session. With 2+ channels loaded, a
+  **Similar mentions** summary sits in that same row (right of the period
+  picker) — exact-text name overlap between every pair of loaded columns
+  (1-based position, e.g. "1↔2: 4, 2↔3: 2, 1↔4: 1"), most-overlapping pair
+  first, a quick "these two cover the same people" signal before reading
+  four columns of text (hover it for which position is which channel). Each
+  column's title names the channel and the full post date range already
+  stored for it (e.g. "posts 2019-08 — 2026-09"), and below that a sortable
+  table (click a header to sort by **ID** — the post id, a bit wider than a
+  bare row number and actually useful — **Date** or **Type** — the post's
+  media makeup, e.g. "Photos x9, Video x1" or "Circle", plus a **Link…**
+  button on its own line for any post with an extracted name (a small menu
+  to pick which, if it has more than one) that opens the same
+  confirm/correct-then-attach flow as the staging table below, without
+  having to scroll down to it — or **Text**) lists its posts (reposts
+  included — a repost's own text is shown first-line-prefixed "Forwarded
+  from `<source>`", green if that source is already in `mentions.md`,
+  resolved against this app's own tracked channels with no extra Telegram
+  API call; needs a re-fetch on channels scanned before this existed), with
+  every extracted name highlighted inline; double-click a row to open that
+  post in Telegram. Every post's text is also checked against
+  `name_exceptions.txt` (see Dependencies below) so a known non-name (e.g.
+  "Мастер-класс") never shows up as extracted at all, even before anyone's
+  clicked **Ignore** on it. Below the texts table, a "**Posts N, Names
+  Found: T, in mentions.md M**" staging table (newest mention first, Name
+  column twice the default width for a full Cyrillic ФИО) lists the names
+  found — whether each is already in `mentions.md` (green check) or not (a
+  **Link…** button, or an **Ignore** button right next to it for a plain
+  extraction mistake — adds to `name_exceptions.txt` and re-extracts every
+  loaded column immediately) — and the post ids it came from, each a
+  clickable link that shows the post's cached thumbnail on hover if one's
+  been fetched. "Already in mentions.md" is matched three ways, most
+  confident first: exactly; as a whole-word run — e.g. mentions.md's "Лина
+  Жу" auto-matches an extraction of "Мастер-класс Лина Жу", NER's
+  occasional habit of grabbing extra text around a real name
+  (word-boundary-matched, so a short name like "Иван" can't spuriously
+  match *inside* an unrelated word like the surname "Иванов"); or as a
+  plausible Russian case variant via `pymorphy3` (see Dependencies below) —
+  mentions.md's "Алиса" also matches an extraction of "Алисой" or "Алисы".
+  Word boundaries are Unicode letters only, so a decorative emoji glued
+  straight onto a word with no space ("Курилко🔥", a common casual-writing
+  style) doesn't stop "Елизавета Курилко" from matching.
+  Below the columns, the
+  `mentions.md` table itself (`id | names | unclear links`, at least twice
+  the height of the per-column tables above and growing to fit every row —
+  no internal scrollbar of its own to fight with the page's) is directly
+  editable and word-wraps long cells (growing the row instead of clipping)
+  — **names** is kept at 45% of the table's width, **unclear links**
+  stretches to fill the rest — a **Show in folder** button next to its
+  title reveals the file in Finder/Explorer, and a **Save** button (enabled
+  only while there are unsaved edits) plus autosave on leaving the view
+  keep it persisted.
 
 ### Folders & Tags view (`📁`)
 
@@ -420,6 +489,34 @@ Dependencies (`requirements.txt`):
 - `PySide6>=6.6` — Qt GUI
 - `telethon>=1.34` — Telegram client
 - `qrcode[pil]>=7.4` — renders the QR-code login image
+- `mawo-slovnet>=1.0.7` — Russian person/location/org NER for the Mentions
+  view (app/mentions.py); downloads its model on first use, then works
+  offline. If it's missing or the download fails, Mentions still shows post
+  texts, just without extracted names (see `extraction_available` in
+  app/mentions.py) — nothing else in the app depends on it. Its main gap is
+  recall on short, casual mentions (a bare first name like "Марина" in a
+  sentence with no surname) — `find_known_names_in_text` (see below and
+  `pymorphy3`) backstops that for names already in `mentions.md`, without
+  pulling in a heavier model. A multilingual BERT model
+  ([Babelscape/wikineural-multilingual-ner](https://huggingface.co/Babelscape/wikineural-multilingual-ner)
+  via `transformers[torch]`) genuinely fixed that recall gap outright when
+  tried — installed and tested side by side, not assumed — but a packaged
+  build went from ~90MB to ~726MB over it, so it was reverted; a rule-based
+  alternative (genuine `natasha`'s `NamesExtractor`) was also tried and
+  reverted after it mistagged ordinary words ("и", "без", "Просто") as
+  names on the same test sentences. DeepPavlov never got that far — its
+  latest release pins `numpy<1.24`, which has no Python 3.12 wheels
+  (confirmed by a failed install, not just its docs).
+- `pymorphy3>=2.0` — Russian morphological analysis, used two ways in
+  app/mentions.py: `MentionsStore.find_row`'s declension-matching tier
+  (mentions.md's "Алиса" matches an extraction of "Алисой"/"Алисы", or
+  "Лина Рязанская" matches "Лину Рязанскую" — an adjectival surname,
+  correctly lemmatized, which a hand-rolled suffix list — kept as the
+  fallback when pymorphy3 isn't installed — can't do), and
+  `find_known_names_in_text`'s plain dictionary-scan fallback mentioned
+  above. Picked over pymorphy2 (and genuine `natasha`, which uses pymorphy2
+  internally) because pymorphy2 imports `pkg_resources`, removed from
+  `setuptools>=81`; pymorphy3 doesn't need that pin.
 
 ## Building standalone binaries
 
@@ -469,7 +566,7 @@ config folder** to jump straight there.
 
 | Data | macOS | Windows | Linux |
 | --- | --- | --- | --- |
-| Config, sessions, checkpoints, folders, tags, media cache | `~/Library/Application Support/TgChannelStat` | `%APPDATA%\TgChannelStat` | `$XDG_CONFIG_HOME` or `~/.config/TgChannelStat` |
+| Config, sessions, checkpoints, folders, tags, mentions, media cache | `~/Library/Application Support/TgChannelStat` | `%APPDATA%\TgChannelStat` | `$XDG_CONFIG_HOME` or `~/.config/TgChannelStat` |
 | Logs | `~/Library/Logs/TgChannelStat` | `%LOCALAPPDATA%\TgChannelStat\logs` | `$XDG_STATE_HOME` or `~/.local/state/tgchannelstat` |
 
 - **`config.json`** — language, theme, profiles, and connection fields.
@@ -480,6 +577,13 @@ config folder** to jump straight there.
 - **`folders.json`** — folder definitions and channel→folder assignments.
 - **`tags.json`** — the loaded tag list, its source `.md` path, and
   channel→tag assignments.
+- **`mentions.md`** — the Mentions view's `id | names | unclear links`
+  table; unlike `tags.json`'s source file, the app both reads *and writes*
+  this one directly (see app/mentions.py).
+- **`name_exceptions.txt`** — plain text, one entry per line, of text the
+  Mentions view's NER extraction should never treat as a person name (built
+  in: "Мастер-класс"). Grows via the Names Found table's **Ignore** button;
+  can also be hand-edited (reloaded next time a channel's opened there).
 - **`media/`** — cached post thumbnails downloaded on demand by the
   High-Quality Posts / dashboard "Fetch media" button.
 - **Logs** rotate at ~2 MB, keeping 5 backups.
@@ -499,6 +603,7 @@ app/
 ├── store.py                # per-channel JSON checkpoint store
 ├── folders.py              # folder definitions + channel assignments
 ├── tags.py                 # tag taxonomy loaded from a Markdown table
+├── mentions.py              # mentions.md store (app-owned, live-edited) + NER extraction
 ├── periods.py              # month/season/rolling-year period-key helpers
 ├── media_cache.py          # on-disk thumbnail cache paths
 ├── scoring.py              # per-post content-quality formula (shared)
@@ -518,8 +623,10 @@ app/
     ├── main_window.py         # sidebar + stacked content views
     ├── config_view.py         # credentials, profiles, login, fetch form, folder MD export
     ├── dashboard_view.py      # stat cards, charts, post cards, top-posts table, export
-    ├── compare_view.py        # side-by-side stat cards for 2-8 channels
-    ├── compare_charts_view.py  # overlaid trend charts for up to 8 channels
+    ├── compare/
+    │   ├── compare_view.py        # side-by-side stat cards for 2-8 channels
+    │   ├── compare_charts_view.py # overlaid trend charts for up to 8 channels
+    │   └── mentions_view.py       # post-text / mentioned-names comparison for up to 4 + mentions.md editor
     ├── folder_stat_view.py    # Folders & Tags: hosts the folder/tag cards + periodic stats + Rating
     ├── content_quality_view.py # High-Quality Posts grid
     ├── mutual_pr_view.py      # ad-swap follower-gain forecast table

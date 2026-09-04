@@ -37,7 +37,7 @@ from .channel_stat import (
     VIRAL_BASELINE_MIN_POSTS, VIRAL_BASELINE_MONTHS, VIRAL_MONTHLY_CAP_FRAC,
     VIRAL_MULTIPLE, _channel_info, _comment_total, _has_buttons, _is_repost,
     _media_type, _month_index, _one_per_month_ids, _preview, _public_forwards,
-    _reaction_total, _top_ids, run_channel_stat,
+    _reaction_total, _repost_source, _top_ids, run_channel_stat,
 )
 from .common import resolve_entity
 
@@ -105,6 +105,7 @@ async def _scan_since(client, entity, cutoff: datetime, ctx) -> list[dict]:
         media_type = _media_type(msg)
         has_buttons = _has_buttons(msg)
         is_repost = _is_repost(msg, own_id)
+        repost_from_id, repost_from_author = _repost_source(msg)
 
         if gid is not None and gid == current_gid and current is not None:
             current["ids"].append(msg.id)
@@ -115,6 +116,10 @@ async def _scan_since(client, entity, cutoff: datetime, ctx) -> list[dict]:
             current["comments"] = max(current["comments"], comments)
             current["has_buttons"] = current["has_buttons"] or has_buttons
             current["repost"] = current["repost"] or is_repost
+            if current["repost_from_id"] is None and repost_from_id is not None:
+                current["repost_from_id"] = repost_from_id
+            if not current["repost_from_author"] and repost_from_author:
+                current["repost_from_author"] = repost_from_author
             if media_type:
                 current["media_counts"][media_type] = (
                     current["media_counts"].get(media_type, 0) + 1)
@@ -130,7 +135,10 @@ async def _scan_since(client, entity, cutoff: datetime, ctx) -> list[dict]:
                 "views": views, "reactions": reactions, "forwards": forwards,
                 "comments": comments, "media_type": media_type,
                 "media_counts": {media_type: 1} if media_type else {},
-                "has_buttons": has_buttons, "repost": is_repost, "public": None,
+                "has_buttons": has_buttons, "repost": is_repost,
+                "repost_from_id": repost_from_id,
+                "repost_from_author": repost_from_author,
+                "public": None,
             }
             current_gid = gid
             rows.append(current)

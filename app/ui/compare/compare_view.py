@@ -14,10 +14,10 @@ from PySide6.QtWidgets import (
     QStackedLayout, QVBoxLayout, QWidget,
 )
 
-from ..errors import friendly_os_error
-from .dashboard_view import fmt_int, short_num
-from .theme import COLORS
-from .widgets import StatCard, hline
+from ...errors import friendly_os_error
+from ..dashboard_view import fmt_int, short_num
+from ..theme import COLORS
+from ..widgets import StatCard, hline
 
 # (card key, i18n key) — order here is display order top-to-bottom.
 _METRICS = [
