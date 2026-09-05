@@ -842,11 +842,13 @@ class DashboardView(QWidget):
 
     def _rebuild_trend_chart(self) -> None:
         monthly = self._data.get("distributions", {}).get("monthly") or []
+        short = self._spans_over_two_years(monthly)
         if self._trend_mode == "season":
             labels, views, reactions, shares, posts, period_keys = (
-                self._trend_season_series(monthly))
+                self._trend_season_series(monthly, short))
         else:
-            labels = [self._month_label_full(m.get("label", "")) for m in monthly]
+            month_label = self._month_label_short if short else self._month_label_full
+            labels = [month_label(m.get("label", "")) for m in monthly]
             views = [int(m.get("views", 0) or 0) for m in monthly]
             reactions = [int(m.get("reactions", 0) or 0) for m in monthly]
             shares = [int(m.get("shares", 0) or 0) for m in monthly]
@@ -907,17 +909,22 @@ class DashboardView(QWidget):
                 for k in period_keys]
 
     @staticmethod
-    def _trend_season_series(monthly: list[dict]) -> tuple[list[str], list[int], list[int],
-                                                             list[int], list[int], list[tuple]]:
+    def _trend_season_series(monthly: list[dict], short: bool = False
+                             ) -> tuple[list[str], list[int], list[int],
+                                        list[int], list[int], list[tuple]]:
         """Sum each season's 3 months together — same season grouping the
-        Folder Stats view uses (see app.periods)."""
+        Folder Stats view uses (see app.periods). `short` swaps "Fall 2025"
+        for "25/F" (see _spans_over_two_years) without changing which
+        months land in which bucket — period_key_label's sort key is the
+        same either way."""
+        mode = "season_short" if short else "season"
         buckets: dict[tuple, dict] = {}
         for m in monthly:
             try:
                 year, month = (int(x) for x in m.get("label", "").split("-"))
             except ValueError:
                 continue
-            key, label = period_key_label(year, month, "season")
+            key, label = period_key_label(year, month, mode)
             b = buckets.setdefault(key, {"label": label, "views": 0, "reactions": 0,
                                          "shares": 0, "count": 0})
             b["views"] += int(m.get("views", 0) or 0)
@@ -930,12 +937,38 @@ class DashboardView(QWidget):
                [buckets[k]["count"] for k in keys], keys)
 
     @staticmethod
+    def _spans_over_two_years(monthly: list[dict]) -> bool:
+        """Whether `monthly`'s first and last "YYYY-MM" labels are 2+
+        calendar years apart — past that point "Aug '25" / "Fall 2025"
+        style labels take up more width than the trend chart's x-axis can
+        comfortably fit, so _rebuild_trend_chart switches to
+        _month_label_short / period_key_label's "season_short" mode."""
+        labels = sorted(m["label"] for m in monthly if m.get("label"))
+        if len(labels) < 2:
+            return False
+        try:
+            y0, m0 = (int(x) for x in labels[0].split("-"))
+            y1, m1 = (int(x) for x in labels[-1].split("-"))
+        except ValueError:
+            return False
+        return (y1 * 12 + m1) - (y0 * 12 + m0) >= 24
+
+    @staticmethod
     def _month_label_full(iso_month: str) -> str:
         """Unlike a plain month-abbreviation label, the trend chart can span
         years, so a bare "Jul" would be ambiguous — tag the year on."""
         try:
             y, m = iso_month.split("-")
             return f"{MONTHS_SHORT[int(m)]} '{y[2:]}"
+        except (ValueError, IndexError):
+            return iso_month
+
+    @staticmethod
+    def _month_label_short(iso_month: str) -> str:
+        """"25/8" — see _spans_over_two_years."""
+        try:
+            y, m = iso_month.split("-")
+            return f"{y[2:]}/{int(m)}"
         except (ValueError, IndexError):
             return iso_month
 

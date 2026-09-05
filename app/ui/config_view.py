@@ -32,6 +32,7 @@ from ..tags import TagStore
 from ..tools.channel_stat import run_channel_stat
 from ..tools.comments_refresh import run_comments_refresh
 from ..tools.lean_refresh import run_lean_refresh
+from ..tools.mentions_refresh import run_mentions_refresh
 from ..worker import CheckLoginWorker, ToolWorker
 from .dashboard_view import fmt_int
 from .folder_dialog import FolderManagerDialog
@@ -110,9 +111,10 @@ class ConfigView(QWidget):
 
         # Every button that must be greyed out while a background worker runs
         # (the fetch/comments/lean jobs all share self.worker).
-        self._busy_btns = [self.fetch_btn, self.refresh_comments_btn,
+        self._busy_btns = [self.fetch_btn, self.refresh_mentions_btn, self.refresh_comments_btn,
                            self.lean_oldest_btn, self.lean_1mo_btn, self.lean_3mo_btn,
-                           self.lean_selected_btn, self.lean_selected_2y_btn]
+                           self.lean_selected_btn, self.lean_selected_2y_btn,
+                           self.refetch_mentions_btn]
 
     def _connection_card(self) -> Card:
         card = SectionCard("Telegram")
@@ -385,6 +387,23 @@ class ConfigView(QWidget):
         self.lean_help_lbl.setWordWrap(True)
         card.body.addWidget(self.lean_help_lbl)
 
+        # "Refresh mentions": same lightweight partial re-fetch shape as
+        # "Refresh comments" below, but patches `links` instead — only on
+        # rows that already have text, since a post with no caption can't
+        # carry a link either (see tools.mentions_refresh). For a folder
+        # whose channels were fetched before link-extraction existed, or
+        # whose posts' links have otherwise gone stale.
+        mentions_row = QHBoxLayout()
+        self.mentions_refresh_lbl = QLabel(self.tr_("folder_mentions_refresh_label"))
+        mentions_row.addWidget(self.mentions_refresh_lbl)
+        self.mentions_folder_combo = QComboBox()
+        mentions_row.addWidget(self.mentions_folder_combo, 1)
+        self.refresh_mentions_btn = QPushButton(self.tr_("folder_mentions_refresh_btn"))
+        self.refresh_mentions_btn.setToolTip(self.tr_("folder_mentions_refresh_hint"))
+        self.refresh_mentions_btn.clicked.connect(self._on_refresh_mentions_clicked)
+        mentions_row.addWidget(self.refresh_mentions_btn)
+        card.body.addLayout(mentions_row)
+
         # "Refresh comments" (moved here from the Folders card): a lightweight
         # partial re-fetch that only patches the `comments` field on each
         # channel's already-stored checkpoint rows (see tools.comments_refresh)
@@ -422,6 +441,10 @@ class ConfigView(QWidget):
         self.lean_selected_2y_btn.setToolTip(self.tr_("lean_refresh_selected_2y_hint"))
         self.lean_selected_2y_btn.clicked.connect(self._on_lean_refresh_selected_2y)
         btn_row.addWidget(self.lean_selected_2y_btn)
+        self.refetch_mentions_btn = QPushButton(self.tr_("lean_refetch_mentions_btn"))
+        self.refetch_mentions_btn.setToolTip(self.tr_("lean_refetch_mentions_hint"))
+        self.refetch_mentions_btn.clicked.connect(self._on_refetch_mentions_selected)
+        btn_row.addWidget(self.refetch_mentions_btn)
         btn_row.addStretch()
         card.body.addLayout(btn_row)
 
@@ -725,6 +748,20 @@ class ConfigView(QWidget):
         QMessageBox.information(self, self.tr_("app_title"), self.tr_("tag_load_md_done", n=n))
 
     def refresh_folders_list(self) -> None:
+        current_mentions_folder_id = self.mentions_folder_combo.currentData()
+        self.mentions_folder_combo.blockSignals(True)
+        self.mentions_folder_combo.clear()
+        for folder in self.folder_store.list_folders():
+            self.mentions_folder_combo.addItem(folder["name"], folder["id"])
+        if self.mentions_folder_combo.count():
+            idx = self.mentions_folder_combo.findData(current_mentions_folder_id)
+            self.mentions_folder_combo.setCurrentIndex(idx if idx >= 0 else 0)
+        self.mentions_folder_combo.blockSignals(False)
+        has_mentions_folders = self.mentions_folder_combo.count() > 0
+        self.mentions_refresh_lbl.setVisible(has_mentions_folders)
+        self.mentions_folder_combo.setVisible(has_mentions_folders)
+        self.refresh_mentions_btn.setVisible(has_mentions_folders)
+
         current_folder_id = self.comments_folder_combo.currentData()
         self.comments_folder_combo.blockSignals(True)
         self.comments_folder_combo.clear()
@@ -1114,6 +1151,8 @@ class ConfigView(QWidget):
         self.lean_selected_btn.setToolTip(self.tr_("lean_refresh_selected_hint"))
         self.lean_selected_2y_btn.setText(self.tr_("lean_refresh_selected_2y_btn"))
         self.lean_selected_2y_btn.setToolTip(self.tr_("lean_refresh_selected_2y_hint"))
+        self.refetch_mentions_btn.setText(self.tr_("lean_refetch_mentions_btn"))
+        self.refetch_mentions_btn.setToolTip(self.tr_("lean_refetch_mentions_hint"))
         self.lean_empty_lbl.setText(self.tr_("lean_refresh_empty"))
         self._set_lean_headers()
         self.refresh_lean_list()
@@ -1384,6 +1423,84 @@ class ConfigView(QWidget):
         self.worker.start()
 
     def _on_refresh_comments_done(self, ok: bool, msg: str) -> None:
+        self._set_busy(False)
+        if self.progress.maximum() == 0:
+            self.progress.setRange(0, 1)
+            self.progress.setValue(1 if ok else 0)
+        self.worker = None
+        self.refresh_lean_list()
+        if ok:
+            self.checkpoints_changed.emit()
+        else:
+            self._append_log(self.tr_("done_fail", msg=msg))
+
+    # --------------------------------------------------- refresh mentions
+    def _on_refresh_mentions_clicked(self) -> None:
+        folder_id = self.mentions_folder_combo.currentData()
+        if not folder_id:
+            return
+        keys = [k for k, fid in self.folder_store.assignments.items() if fid == folder_id]
+        if not keys:
+            QMessageBox.information(self, self.tr_("app_title"),
+                                    self.tr_("folder_stat_empty_channels"))
+            return
+        self.mentions_refresh(keys)
+
+    def _on_refetch_mentions_selected(self) -> None:
+        """The Lean refresh table's checkbox-based counterpart to the
+        folder-scoped "Refresh mentions for:" row above — same underlying
+        tools.mentions_refresh job, just targeting whichever rows are
+        ticked in the staleness list instead of a whole folder."""
+        keys = self._lean_checked_keys()
+        if not keys:
+            QMessageBox.information(self, self.tr_("app_title"),
+                                   self.tr_("lean_refresh_none_selected"))
+            return
+        if self.is_running():
+            QMessageBox.warning(self, self.tr_("app_title"), self.tr_("worker_running"))
+            return
+        reply = QMessageBox.question(
+            self, self.tr_("app_title"),
+            self.tr_("mentions_refresh_confirm", count=len(keys)))
+        if reply != QMessageBox.StandardButton.Yes:
+            return
+        self.mentions_refresh(keys)
+
+    def mentions_refresh(self, keys: list[str]) -> bool:
+        """Start a links-only refetch of `keys` (see tools.mentions_refresh)
+        — shared by the folder-scoped "Refresh mentions for:" row and the
+        Lean refresh table's checkbox-based "Refetch Mentions" button.
+        Returns True if a worker was started."""
+        keys = [k for k in keys if k]
+        if not keys:
+            return False
+        self._store_fields()
+        if not self._has_conn():
+            QMessageBox.warning(self, self.tr_("app_title"), self.tr_("missing_conn"))
+            return False
+        if self.is_running():
+            QMessageBox.warning(self, self.tr_("app_title"), self.tr_("worker_running"))
+            return False
+
+        self.log_view.clear()
+        conn = {
+            "api_id": self.cfg.get("API_ID").strip(),
+            "api_hash": self.cfg.get("API_HASH").strip(),
+            "phone": self.cfg.get("PHONE_NUMBER").strip(),
+            "session": self.cfg.session_path(),
+        }
+        self.worker = ToolWorker(run_mentions_refresh, {"keys": keys}, conn, parent=self)
+        self.worker.sig_log.connect(self._append_log)
+        self.worker.sig_progress.connect(self._on_progress)
+        self.worker.sig_ask.connect(self._on_ask)
+        self.worker.sig_done.connect(self._on_refresh_mentions_done)
+
+        self._set_busy(True)
+        self.progress.setRange(0, 0)
+        self.worker.start()
+        return True
+
+    def _on_refresh_mentions_done(self, ok: bool, msg: str) -> None:
         self._set_busy(False)
         if self.progress.maximum() == 0:
             self.progress.setRange(0, 1)

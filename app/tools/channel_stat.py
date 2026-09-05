@@ -24,6 +24,8 @@ import json
 import time
 from datetime import datetime, timedelta, timezone
 
+from telethon.tl.types import MessageEntityMention, MessageEntityTextUrl, MessageEntityUrl
+
 from .common import resolve_entity
 
 HEARTBEAT_EVERY = 500
@@ -150,6 +152,52 @@ def _repost_source(msg) -> tuple[int | None, str]:
     channel_id = getattr(getattr(fwd, "from_id", None), "channel_id", None)
     author = (getattr(fwd, "post_author", None) or "").strip()
     return (int(channel_id) if channel_id is not None else None), author
+
+
+_LINK_ENTITY_TYPES = (MessageEntityUrl, MessageEntityTextUrl, MessageEntityMention)
+
+
+def _extract_links(msg) -> list[dict]:
+    """Every link this message actually carries, as {"text", "url"} pairs,
+    distinct by url and in the order they appear: a plain URL typed into
+    the text (MessageEntityUrl — its "inner text" *is* the URL, so `text`
+    just repeats it), a "text link" (MessageEntityTextUrl — `text` is the
+    visible display text, e.g. a person's name, and `url` is its real
+    target, otherwise invisible in `msg.message` itself since only the
+    display text sits there — the "hidden in text" gap that motivated
+    capturing links as their own field), and a bare "@username" mention
+    (MessageEntityMention — no URL entity at all, just plain text Telegram
+    still auto-detects and treats as a link to that channel/user; missing
+    this one meant a post crediting a collaborator as plain "@kuprianow"
+    text, with no actual hyperlink, never showed up as a link at all).
+    Keeping `text` alongside `url`, rather than just the bare url list this
+    used to return, is what lets the Mentions view tell *which* word a link
+    belongs to — e.g. a post naming "Алиса" as this week's model, with a
+    text-link's display text of "Алиса" pointing at her own channel — and
+    use that to strengthen an otherwise-ambiguous name extraction (see
+    app.ui.compare.mentions_view._populate_texts_table).
+
+    Uses Message.get_entities_text() rather than slicing `msg.message` by
+    hand with the entity's own offset/length — those offsets are UTF-16
+    code units (Telegram's wire format), which can disagree with Python
+    string indices as soon as an emoji or other astral character appears
+    earlier in the text; get_entities_text() (and the get_inner_text()
+    helper it calls) already does the surrogate-pair-aware conversion this
+    would otherwise get wrong."""
+    seen: dict[str, dict] = {}
+    for ent, inner_text in msg.get_entities_text(_LINK_ENTITY_TYPES):
+        if isinstance(ent, MessageEntityTextUrl):
+            url, text = ent.url, inner_text
+        elif isinstance(ent, MessageEntityMention):
+            username = inner_text.lstrip("@").strip()
+            if not username:
+                continue
+            url, text = f"https://t.me/{username}", inner_text
+        else:
+            url, text = inner_text, inner_text
+        if url:
+            seen.setdefault(url, {"text": text, "url": url})
+    return list(seen.values())
 
 
 def _preview(text: str, limit: int = 140) -> str:
@@ -535,6 +583,7 @@ async def run_channel_stat(client, p: dict, ctx) -> str:
         has_buttons = _has_buttons(msg)
         is_repost = _is_repost(msg, info["id"])
         repost_from_id, repost_from_author = _repost_source(msg)
+        links = _extract_links(msg)
 
         if gid is not None and gid == current_gid:
             # Same album — merge into the row being built (see channel_top).
@@ -562,6 +611,7 @@ async def run_channel_stat(client, p: dict, ctx) -> str:
             if not current["text"] and text:
                 current["text"] = text
                 current["full_text"] = full_text
+                current["links"] = links
         else:
             if current is not None:
                 _account(current, current_anchor_msg)  # previous group is now closed
@@ -572,6 +622,10 @@ async def run_channel_stat(client, p: dict, ctx) -> str:
                 "date": msg.date.isoformat() if msg.date else "",
                 "text": text,
                 "full_text": full_text,
+                # See _extract_links — paired with text/full_text above
+                # (fill-in-only in the merge branch), since a link only
+                # makes sense attached to the caption it actually came from.
+                "links": links,
                 "views": views,
                 "reactions": reactions,
                 "forwards": forwards,
@@ -658,6 +712,22 @@ async def run_channel_stat(client, p: dict, ctx) -> str:
         "monthly": _monthly_series(month_counts, month_agg, month_top),
     }
 
+    # Every scanned post's links, not just the engagement pool below --
+    # _extract_links already ran over every row during the iter_messages
+    # loop above (it's free, no extra Telegram calls), so this just keeps
+    # what the pool filter would otherwise throw away. Still no full_text
+    # (only date + each link's own {"text","url"}) since it's one entry per
+    # *scanned* post rather than per pool post, but the anchor text itself
+    # is kept -- app.mentions.classify_channel_links needs it to tell a
+    # person's name from a plain "Boosty"/"смотреть здесь" button caption,
+    # and it's a couple of words, not a full caption, so this stays cheap
+    # even across a channel's entire history. Backs Mentions' "All unique
+    # links"/"Balance tg / web links" stats (see
+    # mentions_view._link_balance_stats_full) and its full-history
+    # fair/fake/unresolved classification (see
+    # mentions_view._classify_full_history).
+    all_links = [{"date": r["date"], "links": r["links"]} for r in rows if r["links"]]
+
     # -------- engagement pool (union of top-N by each metric) --------
     # Also unions in the top-N most *recent* posts ("ts") and one post per
     # calendar month, not just the top-N by engagement — a fresh post has
@@ -718,4 +788,5 @@ async def run_channel_stat(client, p: dict, ctx) -> str:
         "distributions": distributions,
         "scanned": len(rows),
         "rows": pool,
+        "all_links": all_links,
     })

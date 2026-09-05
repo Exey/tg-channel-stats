@@ -33,10 +33,13 @@ For a chosen channel and time window, a single pass over the channel's history
 produces one JSON checkpoint holding:
 
 - **Engagement ranking** — per-post views, reactions, forwards ("private
-  reposts"), comments, media type, and whether the post was itself forwarded
-  in from another channel (plus that forward's origin, when Telegram exposes
-  it — the Mentions view uses this), with albums merged into one row. It
-  keeps the union of the top-N by each metric *plus* the most recent top-N
+  reposts"), comments, media type, links (both a plain URL typed in the
+  caption and a "text link"'s real target, which Telegram never puts in the
+  plain message text — see **Refresh mentions** below), and whether the
+  post was itself forwarded in from another channel (plus that forward's
+  origin, when Telegram exposes it — the Mentions view uses this), with
+  albums merged into one row. It keeps the union of the top-N by each metric
+  *plus* the most recent top-N
   *plus* the best post of every calendar month, so the on-screen table can
   re-sort by any column and still show the true leaders, and the
   quality/recent views never silently drop a month. Optionally fetches
@@ -62,8 +65,12 @@ Stat cards (members, posts, posts/day, avg views, **ERR%**, **ERV%**,
 **Virality index**, avg reposts/reactions — see
 [Stats & scoring algorithms](#stats--scoring-algorithms)), a wide activity
 trend chart with toggleable Views / Reactions / Shares / Posts / **Quality**
-lines (month or season buckets), by-hour and by-weekday bar charts, a "Last
-50 Posts" card row with per-post content-quality gauges, and a sortable
+lines (month or season buckets — past a 2-year displayed range, "Aug '25" /
+"Fall 2025" style labels would start crowding the axis, so they switch to a
+compact "25/8" (month) or "25/F" / "25/W" / "25/P" / "25/S" (season —
+Fall/Winter/sPring/Summer) form instead), by-hour and by-weekday bar
+charts, a "Last 50 Posts" card row with per-post content-quality gauges,
+and a sortable
 top-posts table. Click a post to open it in Telegram; click a reposts cell
 to see who re-shared it. Export the report as Markdown or copy a plain-text
 link list.
@@ -111,19 +118,47 @@ them carries the current selection over rather than resetting it):
   from `<source>`", green if that source is already in `mentions.md`,
   resolved against this app's own tracked channels with no extra Telegram
   API call; needs a re-fetch on channels scanned before this existed), with
-  every extracted name highlighted inline; double-click a row to open that
-  post in Telegram. Every post's text is also checked against
-  `name_exceptions.txt` (see Dependencies below) so a known non-name (e.g.
-  "Мастер-класс") never shows up as extracted at all, even before anyone's
-  clicked **Ignore** on it. Below the texts table, a "**Posts N, Names
-  Found: T, in mentions.md M**" staging table (newest mention first, Name
-  column twice the default width for a full Cyrillic ФИО) lists the names
+  every extracted name highlighted inline — and, when that exact name is
+  also the post's own link anchor text (a "text link," e.g. a model's name
+  hyperlinked to her own channel — see **Refresh mentions** above),
+  clickable straight to that link's target: green if the link is already
+  sitting in some `mentions.md` row's unclear links (a strong hint of
+  which person this is even when the bare name alone is ambiguous, e.g. a
+  first name with no surname), the usual highlight color otherwise, still
+  clickable either way. Double-click a row to open that post in Telegram.
+  Every post's text is also checked against `name_exceptions.txt` (see
+  Dependencies below) so a known non-name (e.g. "Мастер-класс") never
+  shows up as extracted at all, even before anyone's clicked **Ignore** on
+  it. Just above the texts table, a "**Posts N/Total, Telegram links T, Web
+  links W, Most repeat (C): `t.me/…`**" line summarizes the column's own
+  links — "Total" is the channel's true post count for the period (from its
+  full monthly distributions, not just the texts table's row count, which
+  is capped at whatever's in the stored top-N sample — a channel with
+  thousands of posts might only have a few dozen sampled with full text);
+  "Telegram links" vs "Web links" splits by host (`t.me`/`telegram.me`/
+  `telegram.org` vs everything else); "Most repeat" is the single most-
+  recurring link across the column's posts, shown without its scheme and
+  clickable straight to it. Below the texts table, a "**Posts N/Total, Names
+  Found: T, in mentions.md M**" staging table (same N/Total fix, newest
+  mention first, Name column twice the default width for a full Cyrillic
+  ФИО) lists the names
   found — whether each is already in `mentions.md` (green check) or not (a
-  **Link…** button, or an **Ignore** button right next to it for a plain
-  extraction mistake — adds to `name_exceptions.txt` and re-extracts every
-  loaded column immediately) — and the post ids it came from, each a
-  clickable link that shows the post's cached thumbnail on hover if one's
-  been fetched. "Already in mentions.md" is matched three ways, most
+  **Link…** link, styled like a small button and bolder/green when that name
+  is also this post's own Telegram-link anchor text (see **Refresh
+  mentions** above), a higher-confidence "this really is a person/channel"
+  signal than plain text extraction; creating a new mentions.md row for one
+  of these suggests the link's own `@username` as the id instead of the
+  extracted name text, e.g. a "Марго" hyperlinked to `t.me/gotomargosha`
+  suggests `@gotomargosha` — or an **Ignore** link right next to it for a
+  plain extraction mistake — adds to `name_exceptions.txt` and re-extracts
+  every loaded column immediately; both live in one word-wrapped cell, so
+  they wrap onto a second line rather than getting squeezed together when
+  the column's too narrow for both) — and the post ids it came from, each
+  its own clickable link in that same word-wrapped cell (wrapping onto more
+  lines rather than getting clipped off the edge when a name has been
+  mentioned in many posts) that shows the post's cached thumbnail on hover
+  if one's been fetched. "Already in
+  mentions.md" is matched three ways, most
   confident first: exactly; as a whole-word run — e.g. mentions.md's "Лина
   Жу" auto-matches an extraction of "Мастер-класс Лина Жу", NER's
   occasional habit of grabbing extra text around a real name
@@ -134,13 +169,34 @@ them carries the current selection over rather than resetting it):
   Word boundaries are Unicode letters only, so a decorative emoji glued
   straight onto a word with no space ("Курилко🔥", a common casual-writing
   style) doesn't stop "Елизавета Курилко" from matching.
+  Below the Names Found table, a small "**Summary**" stats table sums up how
+  trustworthy those names are: **Fair mentions** (a name whose own link
+  anchor text is a *Telegram* link already resolved to a `mentions.md` row
+  under a *different* id — e.g. "Марго" hyperlinked to a link `mentions.md`
+  already files under `@gotomargosha` — the link is what proves the
+  identity, not the bare text), **Fake mentions** (a name whose own link
+  anchor points to a non-Telegram/web resource instead — not actually a
+  Telegram identity), **Force link** (the single most-repeated
+  name-anchored link, clickable), **Mentions fairness** (fair ÷ (fair +
+  fake), as a percentage), **All unique links** (every distinct url in the
+  column's scope, not just name-anchored ones), and **Balance tg / web
+  links** (what fraction of those unique links are Telegram vs. everything
+  else, e.g. "52%/48%"). Two more rows open a separate window instead of a
+  bare number: **Link report** lists every name-anchored link in scope as
+  "`<count>: <url>`", one per line, for copy-pasting elsewhere; **Unresolved
+  fair links** tables every Telegram link that's a name's own anchor text
+  but isn't in `mentions.md` yet — exactly what would turn into a "fair"
+  mention once linked — each row with its own **Link…** button running the
+  same confirm/attach flow as the main tables, so they can be resolved
+  without hunting the name back down
+  in the texts table above.
   Below the columns, the
   `mentions.md` table itself (`id | names | unclear links`, at least twice
   the height of the per-column tables above and growing to fit every row —
   no internal scrollbar of its own to fight with the page's) is directly
   editable and word-wraps long cells (growing the row instead of clipping)
-  — **names** is kept at 45% of the table's width, **unclear links**
-  stretches to fill the rest — a **Show in folder** button next to its
+  — **id** is 240px, **names** is kept at 45% of the table's width,
+  **unclear links** stretches to fill the rest — a **Show in folder** button next to its
   title reveals the file in Finder/Explorer, and a **Save** button (enabled
   only while there are unsaved edits) plus autosave on leaving the view
   keep it persisted.
@@ -213,6 +269,19 @@ and appends just the MPR Pairs table (`## Пары ВП`).
 - **Named profiles** — keep several accounts/API keys side by side.
 - **`.env` import/export** of connection settings (also understands
   `TG_API_ID` / `TG_API_HASH` / `TG_PHONE` naming).
+- **Refresh mentions** — a folder-wide action (Config screen's Lean refresh
+  card, same row shape as **Refresh comments** below, sitting just above
+  it) that re-reads just the links for every already-textual stored post
+  (added after some checkpoints were fetched, or for a channel whose links
+  have otherwise gone stale) without a full re-scan — posts with no text at
+  all are skipped, since they can't carry a link either. A link is a plain
+  URL typed into the caption, a "text link" (hyperlinked display text whose
+  actual target is otherwise invisible — Telegram never puts it in the
+  plain message text), or a bare `@username` mention with no hyperlink at
+  all (Telegram still auto-detects these as their own entity type — a post
+  crediting a collaborator as plain "@some_channel" text, with no actual
+  link, is captured as one too) — all three come from the fetch itself now,
+  not from eyeballing `full_text`.
 - **Refresh comments** — a folder-wide action (on the Config screen's Lean
   refresh card) that re-reads just the comment count for stored posts (added
   after some checkpoints were fetched) without a full re-scan.
@@ -228,6 +297,9 @@ and appends just the MPR Pairs table (`## Пары ВП`).
   **Re-fetch selected · 2 y** does a full (non-incremental) 2-year re-scan
   of the ticked channels — the way to rebuild older history against per-post
   fields added since the last fetch (reposts, ad buttons, comments).
+  **Refetch mentions** is the same ticked-row targeting, but runs the
+  **Refresh mentions** job above instead — links only, skipping posts with
+  no text.
 
 ### UI
 
@@ -616,6 +688,7 @@ app/
 ├── tools/
 │   ├── channel_stat.py     # the scan: engagement ranking + activity stats
 │   ├── comments_refresh.py # re-read just the comment count for stored posts
+│   ├── mentions_refresh.py # re-read just the links for already-textual stored posts
 │   ├── lean_refresh.py     # incremental re-scan of the months since last fetch
 │   ├── media_fetch.py      # on-demand post-thumbnail download
 │   └── common.py           # entity resolution, FloodWait retries

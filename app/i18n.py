@@ -59,6 +59,13 @@ EN = {
                                  "computed over — the channel's most recent "
                                  "half-year or season, or its whole "
                                  "all-time stats.",
+    "folder_mentions_refresh_label": "Refresh mentions for:",
+    "folder_mentions_refresh_btn": "🔗 Refresh mentions",
+    "folder_mentions_refresh_hint": "Re-fetch just the links in every "
+                                    "already-textual stored post in this "
+                                    "folder's channels — much faster than a "
+                                    "full re-fetch since it skips everything "
+                                    "else.",
     "folder_comments_refresh_label": "Refresh comments for:",
     "folder_comments_refresh_btn": "💬 Refresh comments",
     "folder_comments_refresh_hint": "Re-fetch just the comment count for "
@@ -100,6 +107,14 @@ EN = {
                                      "rebuilds every month with the current "
                                      "per-post fields (reposts, buttons, "
                                      "comments). Slower than a lean refresh.",
+    "lean_refetch_mentions_btn": "🔗 Refetch mentions",
+    "lean_refetch_mentions_hint": "Re-fetch just the links (see "
+                                  "tools.mentions_refresh) for the ticked "
+                                  "channels' already-textual stored posts — "
+                                  "same job as the folder-scoped \"Refresh "
+                                  "mentions for:\" row above, targeting the "
+                                  "ticked channels instead of a whole folder.",
+    "mentions_refresh_confirm": "Refetch mention links for {count} channel(s)?",
     "lean_refresh_confirm": "Lean-refresh {count} channel(s)?",
     "lean_refresh_full_confirm": "Full re-fetch of {count} channel(s) over the "
                                  "last 2 years? Slower than a lean refresh.",
@@ -300,8 +315,38 @@ EN = {
     "mentions_reload_confirm": "Discard unsaved edits and reload mentions.md "
                                "from disk?",
     "mentions_empty": "Pick up to 4 channels from the sidebar's Mentions mode.",
-    "mentions_names_title_counts": "Posts {posts}, Names Found: {total}, "
-                                   "in mentions.md {linked}",
+    "mentions_names_title_counts": "Posts {posts}/{total_posts}, Names Found: "
+                                   "{total}, in mentions.md {linked}",
+    "mentions_links_title_counts": "Posts {posts}/{total_posts}, Telegram "
+                                   "links {tg}, Web links {web}, ",
+    "mentions_links_title_most": "Most repeat ({count}): ",
+    "mentions_links_title_none": "no links",
+    "mentions_stats_title": "Summary",
+    "mentions_stats_classifying": "Summary — classifying links…",
+    "mentions_stats_fair": "Fair mentions",
+    "mentions_stats_fake": "Fake mentions",
+    "mentions_stats_force_link": "Force link",
+    "mentions_stats_fairness": "Mentions fairness",
+    "mentions_stats_unique_links": "All unique links",
+    "mentions_stats_balance": "Balance tg / web links",
+    "mentions_stats_balance_value": "{tg}%/{web}%",
+    "mentions_stats_none": "—",
+    "mentions_stats_report_row": "Link report ({count}) →",
+    "mentions_stats_unresolved_row": "Unresolved fair links ({count}) →",
+    "mentions_stats_report_title": "Link report — {channel}",
+    "mentions_stats_report_empty": "No classified links in scope.",
+    "mentions_stats_report_col_status": "Status",
+    "mentions_stats_report_col_count": "Count",
+    "mentions_stats_report_col_url": "Link",
+    "mentions_link_status_fair": "Fair",
+    "mentions_link_status_fake": "Fake",
+    "mentions_link_status_unresolved": "Unresolved",
+    "mentions_link_status_promo": "Promo",
+    "mentions_stats_unresolved_title": "Unresolved fair links — {channel}",
+    "mentions_stats_unresolved_empty": "Nothing to link — every "
+                                       "Telegram-linked name is already in "
+                                       "mentions.md.",
+    "mentions_stats_unresolved_col_link": "Link",
     "mentions_similar_title": "Similar mentions",
     "mentions_table_title": "mentions.md",
     "mentions_locate_btn": "Show in folder",
@@ -321,6 +366,8 @@ EN = {
     "mentions_forwarded_from": "Forwarded from {name}",
     "mentions_forwarded": "Forwarded",
     "mentions_link_btn": "Link…",
+    "mentions_link_tg_hint": "Backed by an actual Telegram link in the post "
+                            "— higher confidence than text extraction alone",
     "mentions_ignore_btn": "Ignore",
     "mentions_ignore_hint": "Not a name — never extract this again",
     "mentions_link_new": "+ New id…",
@@ -561,6 +608,13 @@ RU = {
                                  "Просмотры/Долю виральных — последнее "
                                  "полугодие или сезон канала, либо вся "
                                  "статистика за всё время.",
+    "folder_mentions_refresh_label": "Обновить ссылки для:",
+    "folder_mentions_refresh_btn": "🔗 Обновить ссылки",
+    "folder_mentions_refresh_hint": "Заново получить только ссылки для "
+                                    "каждого уже текстового сохранённого "
+                                    "поста в каналах этой папки — намного "
+                                    "быстрее полной перезагрузки, так как "
+                                    "остальное не трогает.",
     "folder_comments_refresh_label": "Обновить комментарии для:",
     "folder_comments_refresh_btn": "💬 Обновить комментарии",
     "folder_comments_refresh_hint": "Заново получить только число "
@@ -599,6 +653,13 @@ RU = {
                                      "перестраивает все месяцы с текущими "
                                      "полями постов (репосты, кнопки, "
                                      "комментарии). Медленнее лёгкого обновления.",
+    "lean_refetch_mentions_btn": "🔗 Обновить упоминания",
+    "lean_refetch_mentions_hint": "Заново получить только ссылки для уже "
+                                  "текстовых сохранённых постов отмеченных "
+                                  "каналов — та же задача, что и строка "
+                                  "«Обновить ссылки для:» выше, но для "
+                                  "отмеченных каналов вместо целой папки.",
+    "mentions_refresh_confirm": "Обновить ссылки упоминаний для {count} канал(ов)?",
     "lean_refresh_confirm": "Обновить {count} канал(ов)?",
     "lean_refresh_full_confirm": "Полное пересканирование {count} канал(ов) за "
                                  "последние 2 года? Медленнее лёгкого обновления.",
@@ -808,8 +869,38 @@ RU = {
     "mentions_reload_confirm": "Отменить несохранённые изменения и "
                                "перезагрузить mentions.md с диска?",
     "mentions_empty": "Выберите до 4 каналов в режиме «Упоминания» боковой панели.",
-    "mentions_names_title_counts": "Постов {posts}, найдено имён: {total}, "
-                                   "в mentions.md {linked}",
+    "mentions_names_title_counts": "Постов {posts}/{total_posts}, найдено "
+                                   "имён: {total}, в mentions.md {linked}",
+    "mentions_links_title_counts": "Постов {posts}/{total_posts}, "
+                                   "ссылок в Telegram {tg}, веб-ссылок {web}, ",
+    "mentions_links_title_most": "Чаще всего ({count}): ",
+    "mentions_links_title_none": "ссылок нет",
+    "mentions_stats_title": "Сводка",
+    "mentions_stats_classifying": "Сводка — классификация ссылок…",
+    "mentions_stats_fair": "Честные упоминания",
+    "mentions_stats_fake": "Ложные упоминания",
+    "mentions_stats_force_link": "Основная ссылка",
+    "mentions_stats_fairness": "Честность упоминаний",
+    "mentions_stats_unique_links": "Все уникальные ссылки",
+    "mentions_stats_balance": "Баланс tg / веб ссылок",
+    "mentions_stats_balance_value": "{tg}%/{web}%",
+    "mentions_stats_none": "—",
+    "mentions_stats_report_row": "Отчёт по ссылкам ({count}) →",
+    "mentions_stats_unresolved_row": "Неразрешённые честные ссылки ({count}) →",
+    "mentions_stats_report_title": "Отчёт по ссылкам — {channel}",
+    "mentions_stats_report_empty": "В выборке нет классифицированных ссылок.",
+    "mentions_stats_report_col_status": "Статус",
+    "mentions_stats_report_col_count": "Кол-во",
+    "mentions_stats_report_col_url": "Ссылка",
+    "mentions_link_status_fair": "Честная",
+    "mentions_link_status_fake": "Ложная",
+    "mentions_link_status_unresolved": "Не разрешена",
+    "mentions_link_status_promo": "Промо",
+    "mentions_stats_unresolved_title": "Неразрешённые честные ссылки — {channel}",
+    "mentions_stats_unresolved_empty": "Нечего связывать — каждое имя со "
+                                       "ссылкой Telegram уже есть в "
+                                       "mentions.md.",
+    "mentions_stats_unresolved_col_link": "Ссылка",
     "mentions_similar_title": "Похожие упоминания",
     "mentions_table_title": "mentions.md",
     "mentions_locate_btn": "Показать в папке",
@@ -829,6 +920,8 @@ RU = {
     "mentions_forwarded_from": "Переслано от {name}",
     "mentions_forwarded": "Переслано",
     "mentions_link_btn": "Связать…",
+    "mentions_link_tg_hint": "Подтверждено настоящей ссылкой Telegram в "
+                            "посте — увереннее, чем просто извлечение текста",
     "mentions_ignore_btn": "Игнорировать",
     "mentions_ignore_hint": "Не имя — больше не извлекать",
     "mentions_link_new": "+ Новый id…",

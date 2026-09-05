@@ -81,6 +81,7 @@ import os
 import re
 import tempfile
 from pathlib import Path
+from urllib.parse import urlparse
 
 from .config import config_dir
 
@@ -259,6 +260,48 @@ def _names_declension_match(a: str, b: str) -> bool:
         for x, y in zip(wa, wb))
 
 
+def names_match(a: str, b: str) -> bool:
+    """Whether `a` and `b` (any casing) refer to the same span of text —
+    exact (word-for-word, case-insensitive) or a plausible Russian case
+    variant of each other (see _names_declension_match). Used to match an
+    extracted name against a link's anchor text from the same post (see
+    channel_stat._extract_links and
+    app.ui.compare.mentions_view._highlight_names_with_links) — NER might
+    include a trailing emoji a link's anchor span doesn't, or the two might
+    tag slightly different case forms of the same word, so this is a
+    little more tolerant than a bare string comparison."""
+    a, b = a.strip().casefold(), b.strip().casefold()
+    if not a or not b:
+        return False
+    return _words(a) == _words(b) or _names_declension_match(a, b)
+
+
+def is_telegram_link(url: str) -> bool:
+    """Whether `url` is a t.me/telegram.me/telegram.org link -- the line
+    every fair/fake/promo classification in this module (see
+    classify_channel_links) and the Mentions view's own stats draw between
+    "a real Telegram account" and "at best a web page mentioning someone"."""
+    host = urlparse(url).netloc.lower()
+    return host in ("t.me", "telegram.me", "telegram.org") or host.endswith(".t.me")
+
+
+def normalize_links(raw_links) -> list[dict]:
+    """[{"text","url"}, …] regardless of which shape `raw_links` (a row's
+    stored "links" field) is in: the current one (see
+    channel_stat._extract_links) or the flat url-string list it used to be
+    before anchor text was captured — a checkpoint fetched before that
+    change won't have the richer shape until it's re-fetched (see
+    tools.mentions_refresh), and this is what lets code that reads `links`
+    not care which one it's looking at."""
+    out = []
+    for link in raw_links or []:
+        if isinstance(link, str) and link.strip():
+            out.append({"text": link, "url": link})
+        elif isinstance(link, dict) and link.get("url"):
+            out.append({"text": link.get("text") or link["url"], "url": link["url"]})
+    return out
+
+
 # ------------------------------------------------------------------ store
 class MentionsStore:
     """In-memory rows plus a dirty flag — the Mentions view edits this
@@ -329,6 +372,23 @@ class MentionsStore:
                 c = c.strip().casefold()
                 if c and _names_declension_match(c, needle):
                     return row
+        return None
+
+    def find_row_by_link(self, url: str) -> dict | None:
+        """The row (if any) whose "unclear links" already contain `url`
+        exactly. Used to color a post's link-bearing highlighted name in
+        the Mentions view's texts table (see
+        app.ui.compare.mentions_view._highlight_names_with_links): if the
+        exact same link a name is hyperlinked to in this post is already
+        sitting in some row's unclear links, that's a strong hint of which
+        person this is even when the bare name text alone is ambiguous
+        (e.g. a first name with no surname)."""
+        url = (url or "").strip()
+        if not url:
+            return None
+        for row in self.rows:
+            if url in (row.get("links") or []):
+                return row
         return None
 
     # ------------------------------------------------------------- edits
@@ -508,3 +568,99 @@ class NameExceptions:
         finally:
             if os.path.exists(tmp):
                 os.remove(tmp)
+
+
+# ------------------------------------------------------- link classification
+# A non-Telegram link seen on this many distinct posts or more reads as the
+# channel's own recurring plug (a Boosty/Patreon subscribe link, a shop...)
+# rather than a one-off mention of a person -- see classify_channel_links's
+# "promo" status. Deliberately low: a genuine one-off mention practically
+# never repeats verbatim across posts the way a standing bio/subscribe link
+# does.
+_PROMO_REPEAT_THRESHOLD = 2
+
+
+def classify_channel_links(entries: list[dict], store: MentionsStore,
+                           name_exceptions: NameExceptions | None = None
+                           ) -> dict[str, dict]:
+    """Full-history per-url classification of every link in `entries` (see
+    channel_stat.py's checkpoint field `all_links` -- one {"date", "links":
+    [{"text","url"}, ...]} entry per *scanned* post, not just the
+    checkpoint's scored top-N `rows` pool used everywhere else in
+    app.ui.compare.mentions_view), keyed by url:
+
+        {"status": "fair" | "unresolved" | "fake" | "promo",
+         "text": <a representative anchor text>, "count": <occurrences>}
+
+    Three of the four statuses cost nothing beyond a mentions.md lookup:
+
+    - "fair": a Telegram link already resolved to a mentions.md row (see
+      MentionsStore.find_row_by_link) under some anchor text other than
+      that row's own id -- the strongest signal there is that this is a
+      real, already-known person credited under a nickname/alias.
+    - "unresolved": a Telegram link *not* yet in mentions.md -- a Telegram
+      anchor inherently names a real account, so this needs no further
+      check either; it's exactly what becomes "fair" once linked (see the
+      Mentions view's "Unresolved fair links" popup).
+    - "promo": a non-Telegram link repeated across >= _PROMO_REPEAT_THRESHOLD
+      distinct posts -- excluded before any name check runs, on cost
+      grounds: this is exactly the bulk of a channel's web links (its own
+      Boosty/Patreon/shop), and it's identifiable from repetition alone,
+      no NER needed.
+
+    Only the rare remainder -- a non-Telegram link seen once, not already in
+    mentions.md, not a repeat plug -- needs an actual name check, and even
+    that's layered cheapest-first: find_known_names_in_text (a plain
+    dictionary scan against mentions.md's own id/name candidates, no model)
+    before falling back to extract_person_names (NER) only if that finds
+    nothing. Either way a real name earns "fake" (a real person, but only
+    web-linked, not a Telegram identity); no name at all (a plain "смотреть
+    здесь"/"Boosty" button caption) means the link is dropped from the
+    result entirely -- not fair, fake, unresolved or promo, just not a
+    mention of anyone.
+
+    This is what makes classifying the *entire* scanned history affordable
+    where running full extraction on every post's text wouldn't be: NER
+    only ever runs on the channel's distinct rare-link anchors -- typically
+    a handful -- never on the hundreds or thousands of posts scanned to
+    find them."""
+    known_candidates = [n for row in store.rows
+                        for n in ([row.get("id", "")] + list(row.get("names") or []))
+                        if n.strip()]
+    agg: dict[str, dict] = {}
+    for entry in entries:
+        for link in entry.get("links") or []:
+            url = link.get("url")
+            if not url:
+                continue
+            a = agg.setdefault(url, {"texts": [], "count": 0})
+            a["count"] += 1
+            text = link.get("text") or url
+            if text not in a["texts"]:
+                a["texts"].append(text)
+
+    out: dict[str, dict] = {}
+    for url, agg_entry in agg.items():
+        texts, count = agg_entry["texts"], agg_entry["count"]
+        rep_text = texts[0]
+        if is_telegram_link(url):
+            row = store.find_row_by_link(url)
+            if row is None:
+                out[url] = {"status": "unresolved", "text": rep_text, "count": count}
+            else:
+                row_id = (row.get("id") or "").strip().casefold()
+                if any(t.strip().casefold() != row_id for t in texts):
+                    out[url] = {"status": "fair", "text": rep_text, "count": count}
+            continue
+        if count >= _PROMO_REPEAT_THRESHOLD:
+            out[url] = {"status": "promo", "text": rep_text, "count": count}
+            continue
+        names = find_known_names_in_text(rep_text, known_candidates)
+        if not names:
+            names = extract_person_names(rep_text)
+            if name_exceptions is not None:
+                names = name_exceptions.filter(names)
+        if names:
+            out[url] = {"status": "fake", "text": rep_text, "count": count}
+        # else: no name found at all -- dropped, not a mention.
+    return out

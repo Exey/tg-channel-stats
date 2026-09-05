@@ -267,6 +267,22 @@ def build_qss() -> str:
     }}
     QTableWidget::item {{ padding: 6px; border-bottom: 1px solid {c['line']}; }}
 
+    /* Mentions view's per-column "Summary" stats table -- deliberately as
+       quiet as the "hint"-styled Posts/Names Found lines above it, not a
+       full-size data table, since it's a plain key/value recap. */
+    QTableWidget#statsTable {{ font-size: 12px; }}
+    QTableWidget#statsTable::item {{
+        padding: 3px 6px; border-bottom: none; color: {c['muted']};
+    }}
+
+    /* Mentions view's per-column post-texts/names-found tables -- same
+       small size as the stats table above (and the "hint"-styled
+       Posts/Names Found lines each sits under), just keeping their own row
+       divider since, unlike Summary, these are genuine sortable data
+       tables, not a quiet key/value recap. */
+    QTableWidget#mentionsColumnTable {{ font-size: 12px; }}
+    QTableWidget#mentionsColumnTable::item {{ padding: 4px 6px; }}
+
     QProgressBar {{
         background: {c['bg']}; border: none; border-radius: 6px;
         height: 8px; text-align: center; color: transparent;

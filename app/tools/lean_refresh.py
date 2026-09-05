@@ -35,9 +35,9 @@ from datetime import datetime, timedelta, timezone
 from ..store import ChannelStore
 from .channel_stat import (
     VIRAL_BASELINE_MIN_POSTS, VIRAL_BASELINE_MONTHS, VIRAL_MONTHLY_CAP_FRAC,
-    VIRAL_MULTIPLE, _channel_info, _comment_total, _has_buttons, _is_repost,
-    _media_type, _month_index, _one_per_month_ids, _preview, _public_forwards,
-    _reaction_total, _repost_source, _top_ids, run_channel_stat,
+    VIRAL_MULTIPLE, _channel_info, _comment_total, _extract_links, _has_buttons,
+    _is_repost, _media_type, _month_index, _one_per_month_ids, _preview,
+    _public_forwards, _reaction_total, _repost_source, _top_ids, run_channel_stat,
 )
 from .common import resolve_entity
 
@@ -106,6 +106,7 @@ async def _scan_since(client, entity, cutoff: datetime, ctx) -> list[dict]:
         has_buttons = _has_buttons(msg)
         is_repost = _is_repost(msg, own_id)
         repost_from_id, repost_from_author = _repost_source(msg)
+        links = _extract_links(msg)
 
         if gid is not None and gid == current_gid and current is not None:
             current["ids"].append(msg.id)
@@ -126,12 +127,13 @@ async def _scan_since(client, entity, cutoff: datetime, ctx) -> list[dict]:
             if not current["text"] and text:
                 current["text"] = text
                 current["full_text"] = full_text
+                current["links"] = links
         else:
             current = {
                 "id": msg.id, "ids": [msg.id],
                 "ts": int(msg.date.timestamp()) if msg.date else 0,
                 "date": msg.date.isoformat() if msg.date else "",
-                "text": text, "full_text": full_text,
+                "text": text, "full_text": full_text, "links": links,
                 "views": views, "reactions": reactions, "forwards": forwards,
                 "comments": comments, "media_type": media_type,
                 "media_counts": {media_type: 1} if media_type else {},

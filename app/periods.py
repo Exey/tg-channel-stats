@@ -13,16 +13,28 @@ SEASON_BY_MONTH = {
     9: "Fall", 10: "Fall", 11: "Fall",
 }
 SEASON_ORDER = {"Winter": 0, "Spring": 1, "Summer": 2, "Fall": 3}
+# Spring gets "P" (not "S") since Summer already claims that letter — the
+# 4 stay distinct: F(all)/W(inter)/P(spring)/S(ummer).
+SEASON_LETTER = {"Winter": "W", "Spring": "P", "Summer": "S", "Fall": "F"}
 
 
 def period_key_label(year: int, month: int, mode: str) -> tuple[tuple, str]:
     """(sort_key, display_label) for a calendar month, grouped into a season
-    when mode == "season", a calendar half (Jan-Jun / Jul-Dec) when
-    mode == "halfyear", else the month itself."""
-    if mode == "season":
+    when mode == "season" ("Fall 2025", "Winter 2025/26") or mode ==
+    "season_short" (same grouping, "25/F", "25/W" — compact form for a
+    chart/table whose displayed range is long enough that full names take
+    up too much room, e.g. dashboard_view's trend chart past 2 years), a
+    calendar half (Jan-Jun / Jul-Dec) when mode == "halfyear", else the
+    month itself. The sort key is identical for "season"/"season_short" —
+    only the label differs — so bucketing by it isn't affected by which
+    label form a caller asked for."""
+    if mode in ("season", "season_short"):
         season = SEASON_BY_MONTH[month]
         year = year + 1 if month == 12 else year
-        if season == "Winter":
+        if mode == "season_short":
+            lead_year = year - 1 if season == "Winter" else year
+            label = f"{str(lead_year)[2:]}/{SEASON_LETTER[season]}"
+        elif season == "Winter":
             label = f"Winter {year - 1}/{str(year)[2:]}"
         else:
             label = f"{season} {year}"
