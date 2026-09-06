@@ -12,8 +12,8 @@ import html
 import re
 from datetime import datetime
 
-from PySide6.QtCore import Qt, QUrl
-from PySide6.QtGui import QDesktopServices, QFont, QFontMetrics, QIcon, QPixmap
+from PySide6.QtCore import Qt
+from PySide6.QtGui import QFont, QFontMetrics, QIcon, QPixmap
 from PySide6.QtWidgets import (
     QAbstractItemView, QApplication, QButtonGroup, QCheckBox, QDialog,
     QDialogButtonBox, QFileDialog, QFrame, QGridLayout, QHBoxLayout,
@@ -37,7 +37,7 @@ from .folder_dialog import FolderManagerDialog
 from .theme import COLORS
 from .widgets import (
     Card, ChartCard, PostCard, SectionCard, StatCard, elide_to_lines, folder_icon, hline,
-    POST_CARD_HEIGHT, POST_CARD_PLACEHOLDERS, POST_CARD_TEXT_LINES,
+    open_external_link, POST_CARD_HEIGHT, POST_CARD_PLACEHOLDERS, POST_CARD_TEXT_LINES,
     POST_CARD_TEXT_PIXEL_SIZE, POST_CARD_TEXT_WIDTH, POST_CARD_THUMB_HEIGHT, POST_CARD_WIDTH,
 )
 
@@ -133,7 +133,7 @@ class PublicForwardsDialog(QDialog):
     def _open_row(self, row: int, _col: int) -> None:
         item = self.table.item(row, 2)
         if item and item.text():
-            QDesktopServices.openUrl(QUrl(item.text()))
+            open_external_link(item.text())
 
 
 class ChannelReportDialog(QDialog):
@@ -1050,7 +1050,7 @@ class DashboardView(QWidget):
         if item:
             link = item.data(Qt.ItemDataRole.UserRole)
             if link:
-                QDesktopServices.openUrl(QUrl(link))
+                open_external_link(link)
 
     def _public_cell(self, row: dict) -> QWidget:
         cell = QWidget()
@@ -1079,7 +1079,7 @@ class DashboardView(QWidget):
         if item:
             link = item.data(Qt.ItemDataRole.UserRole)
             if link:
-                QDesktopServices.openUrl(QUrl(link))
+                open_external_link(link)
 
     # -------------------------------------------------------- date helpers
     def _fmt_date(self, iso: str) -> str:

@@ -12,9 +12,20 @@ from PySide6.QtWidgets import (
     QFrame, QHBoxLayout, QLabel, QPushButton, QToolTip, QVBoxLayout, QWidget,
 )
 
+from ..mentions import tg_deep_link
 from ..scoring import GAUGE_MAX
 from .charts import GaugeDial, Sparkline
 from .theme import COLORS, add_shadow, svg_pixmap
+
+
+def open_external_link(url: str) -> None:
+    """Every link this app opens externally (a post, a channel, a name's
+    own Telegram/web link) should go through this rather than calling
+    QDesktopServices.openUrl directly, so a t.me link opens straight in
+    the Telegram app (see app.mentions.tg_deep_link) instead of a browser
+    tab, app-wide -- not just in whichever view happened to be fixed
+    first."""
+    QDesktopServices.openUrl(QUrl(tg_deep_link(url)))
 
 POST_CARD_WIDTH = 195    # 130 * 1.5
 POST_CARD_HEIGHT = 191   # 225 * 0.85 (see PostCard)
@@ -198,7 +209,7 @@ class PostCard(Card):
 
     def mousePressEvent(self, event) -> None:  # noqa: N802 (Qt naming)
         if self._link:
-            QDesktopServices.openUrl(QUrl(self._link))
+            open_external_link(self._link)
         super().mousePressEvent(event)
 
     def set_data(self, label: str, thumb: QPixmap | None, placeholder: str, text: str,

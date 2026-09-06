@@ -24,8 +24,7 @@ from __future__ import annotations
 from datetime import datetime
 from statistics import median
 
-from PySide6.QtCore import Qt, QUrl
-from PySide6.QtGui import QDesktopServices
+from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QAbstractItemView, QButtonGroup, QComboBox, QFileDialog, QFrame, QHBoxLayout,
     QHeaderView, QLabel, QMessageBox, QPushButton, QScrollArea, QSizePolicy,
@@ -41,7 +40,7 @@ from ..rating import VIRAL_SHARE_DISPLAY_CAP, score_entries
 from ..scoring import post_gauge_value, post_score_raw
 from ..store import ChannelStore
 from .dashboard_view import build_post_link, fmt_int
-from .widgets import SectionCard, hline
+from .widgets import SectionCard, hline, open_external_link
 
 MONTHS_FULL = ["", "January", "February", "March", "April", "May", "June",
                "July", "August", "September", "October", "November", "December"]
@@ -742,7 +741,7 @@ class FolderStatView(QWidget):
         item = self.period_table.item(row, 5)
         link = item.data(Qt.ItemDataRole.UserRole) if item else None
         if link:
-            QDesktopServices.openUrl(QUrl(link))
+            open_external_link(link)
 
     # ------------------------------------------------------------- export
     def _build_md(self) -> str:

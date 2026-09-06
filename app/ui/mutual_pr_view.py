@@ -37,8 +37,8 @@ from __future__ import annotations
 
 import re
 
-from PySide6.QtCore import Qt, QUrl
-from PySide6.QtGui import QColor, QDesktopServices
+from PySide6.QtCore import Qt
+from PySide6.QtGui import QColor
 from PySide6.QtWidgets import (
     QAbstractItemView, QComboBox, QFileDialog, QFrame, QHBoxLayout, QHeaderView,
     QLabel, QMessageBox, QPushButton, QScrollArea, QSizePolicy,
@@ -54,7 +54,7 @@ from ..scoring_pr import (
 from ..store import ChannelStore
 from .dashboard_view import fmt_int, short_num
 from .theme import COLORS
-from .widgets import SectionCard, hline
+from .widgets import SectionCard, hline, open_external_link
 
 # t.me/name or t.me/c/123 -> the "name"/"123" ident, lowercased — used to
 # match a public-repost link back to a tracked channel (moved here from
@@ -521,7 +521,7 @@ class MutualPrView(QWidget):
         item = self.links_table.item(row, 4)
         link = item.data(Qt.ItemDataRole.UserRole) if item else None
         if link:
-            QDesktopServices.openUrl(QUrl(link))
+            open_external_link(link)
 
     # -------------------------------------------------------------- pairs
     def _ranked_pairs(self) -> list[dict]:
@@ -570,7 +570,7 @@ class MutualPrView(QWidget):
         item = self.pairs_table.item(row, col)
         link = item.data(Qt.ItemDataRole.UserRole) if item else None
         if link:
-            QDesktopServices.openUrl(QUrl(link))
+            open_external_link(link)
 
     def _sync_pairs_table_height(self) -> None:
         total = self.pairs_table.horizontalHeader().height()

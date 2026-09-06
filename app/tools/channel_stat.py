@@ -716,17 +716,21 @@ async def run_channel_stat(client, p: dict, ctx) -> str:
     # _extract_links already ran over every row during the iter_messages
     # loop above (it's free, no extra Telegram calls), so this just keeps
     # what the pool filter would otherwise throw away. Still no full_text
-    # (only date + each link's own {"text","url"}) since it's one entry per
-    # *scanned* post rather than per pool post, but the anchor text itself
-    # is kept -- app.mentions.classify_channel_links needs it to tell a
-    # person's name from a plain "Boosty"/"смотреть здесь" button caption,
-    # and it's a couple of words, not a full caption, so this stays cheap
-    # even across a channel's entire history. Backs Mentions' "All unique
+    # (only date + id + each link's own {"text","url"}) since it's one
+    # entry per *scanned* post rather than per pool post, but the anchor
+    # text itself is kept -- app.mentions.classify_channel_links needs it
+    # to tell a person's name from a plain "Boosty"/"смотреть здесь" button
+    # caption, and it's a couple of words, not a full caption, so this
+    # stays cheap even across a channel's entire history. `id` is what lets
+    # the Mentions view's Link report popup jump back to the specific post
+    # a name/link came from, the same way `_post_id_chips` already does for
+    # the pool's own Names Found table. Backs Mentions' "All unique
     # links"/"Balance tg / web links" stats (see
     # mentions_view._link_balance_stats_full) and its full-history
     # fair/fake/unresolved classification (see
     # mentions_view._classify_full_history).
-    all_links = [{"date": r["date"], "links": r["links"]} for r in rows if r["links"]]
+    all_links = [{"date": r["date"], "id": r["id"], "links": r["links"]}
+                for r in rows if r["links"]]
 
     # -------- engagement pool (union of top-N by each metric) --------
     # Also unions in the top-N most *recent* posts ("ts") and one post per
